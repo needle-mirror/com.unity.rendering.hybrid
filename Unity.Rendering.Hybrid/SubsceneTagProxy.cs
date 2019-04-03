@@ -42,7 +42,7 @@ namespace Unity.Entities
         }
     }
 
-    public class SubsceneTagComponent : SharedComponentDataWrapper<SubsceneTag>
+    public class SubsceneTagProxy : SharedComponentDataProxy<SubsceneTag>
     {
     }
 }

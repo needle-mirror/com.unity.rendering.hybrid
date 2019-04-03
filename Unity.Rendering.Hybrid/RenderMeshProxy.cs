@@ -10,18 +10,18 @@ namespace Unity.Rendering
     /// Specified by the LocalToWorld associated with Entity.
     /// </summary>
     [Serializable]
-	public struct RenderMesh : ISharedComponentData
-	{
+    public struct RenderMesh : ISharedComponentData
+    {
         public Mesh                 mesh;
         public Material             material;
-	    public int                  subMesh;
+        public int                  subMesh;
 
         [LayerField]
         public int                  layer;
 
         public ShadowCastingMode    castShadows;
         public bool                 receiveShadows;
-	}
+    }
 
-	public class RenderMeshComponent : SharedComponentDataWrapper<RenderMesh> { }
+    public class RenderMeshProxy : SharedComponentDataProxy<RenderMesh> { }
 }
