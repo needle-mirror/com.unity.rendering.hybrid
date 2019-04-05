@@ -10,8 +10,8 @@ namespace Unity.Rendering
     {
         protected override void OnUpdate()
         {
-            var group = GetComponentGroup(
-                new EntityArchetypeQuery
+            var group = GetEntityQuery(
+                new EntityQueryDesc
                 {
                     All = new ComponentType[] { typeof(RenderBounds), typeof(Static) }
                 });

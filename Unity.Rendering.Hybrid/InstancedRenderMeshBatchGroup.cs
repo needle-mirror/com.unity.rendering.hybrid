@@ -393,7 +393,7 @@ namespace Unity.Rendering
         ComponentSystemBase m_ComponentSystem;
         JobHandle m_CullingJobDependency;
         JobHandle m_LODDependency;
-        ComponentGroup m_CullingJobDependencyGroup;
+        EntityQuery m_CullingJobDependencyGroup;
         BatchRendererGroup m_BatchRendererGroup;
 
         // Our idea of batches. This is indexed by local batch indices.
@@ -449,7 +449,7 @@ namespace Unity.Rendering
 
         ProfilerMarker m_RemoveBatchMarker;
 
-        public InstancedRenderMeshBatchGroup(EntityManager entityManager, ComponentSystemBase componentSystem, ComponentGroup cullingJobDependencyGroup)
+        public InstancedRenderMeshBatchGroup(EntityManager entityManager, ComponentSystemBase componentSystem, EntityQuery cullingJobDependencyGroup)
         {
             m_BatchRendererGroup = new BatchRendererGroup(this.OnPerformCulling);
             m_EntityManager = entityManager;

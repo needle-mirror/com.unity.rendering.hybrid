@@ -74,7 +74,7 @@ namespace Unity.Rendering
             });
 
             
-            using (var boundingVolume = DstEntityManager.CreateComponentGroup(typeof(SceneBoundingVolume)))
+            using (var boundingVolume = DstEntityManager.CreateEntityQuery(typeof(SceneBoundingVolume)))
             {
                 if (!boundingVolume.IsEmptyIgnoreFilter)
                 {

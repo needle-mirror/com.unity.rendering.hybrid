@@ -4,7 +4,12 @@
         "Unity.Rendering.Hybrid",
         "Unity.Mathematics",
         "Unity.Mathematics.Extensions",
-        "Unity.Mathematics.Extensions.Hybrid"
+        "Unity.Mathematics.Extensions.Hybrid",
+        "Unity.Scenes.Hybrid",
+        "Unity.Scenes.Editor",
+        "Unity.Entities.Tests",
+        "Unity.Entities",
+        "Unity.Entities.Hybrid"
     ],
     "optionalUnityReferences": [
         "TestAssemblies"

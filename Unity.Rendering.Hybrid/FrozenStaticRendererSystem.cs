@@ -9,8 +9,8 @@ namespace Unity.Rendering
     {
         protected override void OnUpdate()
         {
-            var group = GetComponentGroup(
-                new EntityArchetypeQuery
+            var group = GetEntityQuery(
+                new EntityQueryDesc
                 {
                     All = new ComponentType[] { typeof(SceneSection), typeof(RenderMesh), typeof(LocalToWorld), typeof(Static) },
                     None = new ComponentType[] { typeof(FrozenRenderSceneTag) }

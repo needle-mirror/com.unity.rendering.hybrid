@@ -27,7 +27,7 @@ namespace Unity.Rendering
         {
             if (m_Enabled)
             {
-                var sys = World.Active.GetExistingManager<RenderMeshSystemV2>();
+                var sys = World.Active.GetExistingSystem<RenderMeshSystemV2>();
 
                 var stats = sys.ComputeCullingStats();
 

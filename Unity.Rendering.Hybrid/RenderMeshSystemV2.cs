@@ -62,10 +62,10 @@ namespace Unity.Rendering
     {
         int m_LastFrozenChunksOrderVersion = -1;
 
-        ComponentGroup m_FrozenGroup;
-        ComponentGroup m_DynamicGroup;
+        EntityQuery m_FrozenGroup;
+        EntityQuery m_DynamicGroup;
 
-        ComponentGroup m_CullingJobDependencyGroup;
+        EntityQuery m_CullingJobDependencyGroup;
         InstancedRenderMeshBatchGroup m_InstancedRenderMeshBatchGroup;
 
         NativeHashMap<FrozenRenderSceneTag, int> m_SubsceneTagVersion;
@@ -77,18 +77,18 @@ namespace Unity.Rendering
         EditorRenderData m_DefaultEditorRenderData = new EditorRenderData { SceneCullingMask = ~0UL };
         #endif
 
-        protected override void OnCreateManager()
+        protected override void OnCreate()
         {
-            //@TODO: Support SetFilter with EntityArchetypeQuery syntax
+            //@TODO: Support SetFilter with EntityQueryDesc syntax
 
-            m_FrozenGroup = GetComponentGroup(
+            m_FrozenGroup = GetEntityQuery(
                 ComponentType.ChunkComponentReadOnly<ChunkWorldRenderBounds>(),
                 ComponentType.ReadOnly<WorldRenderBounds>(),
                 ComponentType.ReadOnly<LocalToWorld>(),
                 ComponentType.ReadOnly<RenderMesh>(),
                 ComponentType.ReadOnly<FrozenRenderSceneTag>()
             );
-            m_DynamicGroup = GetComponentGroup(
+            m_DynamicGroup = GetEntityQuery(
                 ComponentType.ChunkComponentReadOnly<ChunkWorldRenderBounds>(),
                 ComponentType.Exclude<FrozenRenderSceneTag>(),
                 ComponentType.ReadOnly<WorldRenderBounds>(),
@@ -97,7 +97,7 @@ namespace Unity.Rendering
             );
 
             // This component group must include all types that are being used by the culling job
-            m_CullingJobDependencyGroup = GetComponentGroup(
+            m_CullingJobDependencyGroup = GetEntityQuery(
                 ComponentType.ChunkComponentReadOnly<ChunkWorldRenderBounds>(),
                 ComponentType.ReadOnly<RootLodRequirement>(),
                 ComponentType.ReadOnly<LodRequirement>(),
@@ -109,7 +109,7 @@ namespace Unity.Rendering
             m_LastKnownSubsceneTagVersion = new NativeList<SubSceneTagOrderVersion>(Allocator.Persistent);
         }
 
-        protected override void OnDestroyManager()
+        protected override void OnDestroy()
         {
             m_InstancedRenderMeshBatchGroup.CompleteJobs();
             m_InstancedRenderMeshBatchGroup.Dispose();

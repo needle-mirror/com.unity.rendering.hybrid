@@ -13,11 +13,11 @@ namespace Unity.Rendering
     [WorldSystemFilter(WorldSystemFilterFlags.Default | WorldSystemFilterFlags.EntitySceneOptimizations)]
     public class CreateMissingRenderBoundsFromMeshRenderer : ComponentSystem
     {
-        ComponentGroup m_MissingRenderBounds;
+        EntityQuery m_MissingRenderBounds;
 
-        protected override void OnCreateManager()
+        protected override void OnCreate()
         {
-            m_MissingRenderBounds = GetComponentGroup(
+            m_MissingRenderBounds = GetEntityQuery(
                 ComponentType.Exclude<Frozen>(), 
                 ComponentType.Exclude<RenderBounds>(), 
                 ComponentType.ReadWrite<RenderMesh>());
@@ -54,9 +54,9 @@ namespace Unity.Rendering
     [ExecuteAlways]
     public class RenderBoundsUpdateSystem : JobComponentSystem
     {
-        ComponentGroup m_MissingWorldRenderBounds;
-        ComponentGroup m_WorldRenderBounds;
-        ComponentGroup m_MissingWorldChunkRenderBounds;
+        EntityQuery m_MissingWorldRenderBounds;
+        EntityQuery m_WorldRenderBounds;
+        EntityQuery m_MissingWorldChunkRenderBounds;
         
         [BurstCompile]
         struct BoundsJob : IJobChunk
@@ -86,29 +86,29 @@ namespace Unity.Rendering
             }
         }
 
-        protected override void OnCreateManager()
+        protected override void OnCreate()
         {
-            m_MissingWorldRenderBounds = GetComponentGroup
+            m_MissingWorldRenderBounds = GetEntityQuery
             (
-                new EntityArchetypeQuery
+                new EntityQueryDesc
                 {
                     All = new[] {ComponentType.ReadOnly<RenderBounds>(), ComponentType.ReadOnly<LocalToWorld>()},
                     None = new[] {ComponentType.ReadOnly<WorldRenderBounds>(), ComponentType.ReadOnly<Frozen>()}
                 }
             );
             
-            m_MissingWorldChunkRenderBounds = GetComponentGroup
+            m_MissingWorldChunkRenderBounds = GetEntityQuery
             (
-                new EntityArchetypeQuery
+                new EntityQueryDesc
                 {
                     All = new[] { ComponentType.ReadOnly<RenderBounds>(), ComponentType.ReadOnly<LocalToWorld>() },
                     None = new[] { ComponentType.ChunkComponentReadOnly<ChunkWorldRenderBounds>(), ComponentType.ReadOnly<Frozen>() }
                 }
             );
 
-            m_WorldRenderBounds = GetComponentGroup
+            m_WorldRenderBounds = GetEntityQuery
             (
-                new EntityArchetypeQuery
+                new EntityQueryDesc
                 {
                     All = new[] { ComponentType.ChunkComponent<ChunkWorldRenderBounds>(), ComponentType.ReadWrite<WorldRenderBounds>(), ComponentType.ReadOnly<RenderBounds>(), ComponentType.ReadOnly<LocalToWorld>() },
                     None = new[] { ComponentType.ReadOnly<Frozen>() }
@@ -134,7 +134,7 @@ namespace Unity.Rendering
 #if false
         public void DrawGizmos()
         {
-            var boundsGroup = GetComponentGroup(typeof(LocalToWorld), typeof(WorldMeshRenderBounds), typeof(MeshRenderBounds));
+            var boundsGroup = GetEntityQuery(typeof(LocalToWorld), typeof(WorldMeshRenderBounds), typeof(MeshRenderBounds));
             var localToWorlds = boundsGroup.GetComponentDataArray<LocalToWorld>();
             var worldBounds = boundsGroup.GetComponentDataArray<WorldMeshRenderBounds>();
             var localBounds = boundsGroup.GetComponentDataArray<MeshRenderBounds>();
@@ -161,7 +161,7 @@ namespace Unity.Rendering
         {
             if (light.type == LightType.Directional && light.isActiveAndEnabled)
             {
-                var renderer = Entities.World.Active.GetExistingManager<MeshRenderBoundsUpdateSystem>();
+                var renderer = Entities.World.Active.GetExistingSystem<MeshRenderBoundsUpdateSystem>();
                 renderer.DrawGizmos();
             }
         }

@@ -9,8 +9,8 @@ namespace Unity.Rendering
     {
         protected override void OnUpdate()
         {
-            var group = GetComponentGroup(
-                new EntityArchetypeQuery
+            var group = GetEntityQuery(
+                new EntityQueryDesc
                 {
                     Any = new ComponentType[] { typeof(ActiveLODGroupMask), typeof(MeshLODGroupComponent), typeof(HLODComponent), typeof(MeshLODComponent) },
                     All = new ComponentType[] { typeof(Static) }

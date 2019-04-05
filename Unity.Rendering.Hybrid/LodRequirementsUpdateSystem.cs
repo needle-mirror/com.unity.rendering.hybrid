@@ -80,9 +80,9 @@ namespace Unity.Rendering
     [ExecuteAlways]
     public class LodRequirementsUpdateSystem : JobComponentSystem
     {
-        ComponentGroup m_Group;
-        ComponentGroup m_MissingRootLodRequirement;
-        ComponentGroup m_MissingLodRequirement;
+        EntityQuery m_Group;
+        EntityQuery m_MissingRootLodRequirement;
+        EntityQuery m_MissingLodRequirement;
 
         [BurstCompile]
         struct UpdateLodRequirementsJob : IJobChunk
@@ -194,11 +194,11 @@ namespace Unity.Rendering
             }
         }
 
-        protected override void OnCreateManager()
+        protected override void OnCreate()
         {
-            m_MissingLodRequirement = GetComponentGroup(typeof(MeshLODComponent), ComponentType.Exclude<LodRequirement>(), ComponentType.Exclude<Frozen>());
-            m_MissingRootLodRequirement = GetComponentGroup(typeof(MeshLODComponent), ComponentType.Exclude<RootLodRequirement>(), ComponentType.Exclude<Frozen>());
-            m_Group = GetComponentGroup(ComponentType.ReadOnly<LocalToWorld>(), ComponentType.ReadOnly<MeshLODComponent>(), typeof(LodRequirement), typeof(RootLodRequirement), ComponentType.Exclude<Frozen>());
+            m_MissingLodRequirement = GetEntityQuery(typeof(MeshLODComponent), ComponentType.Exclude<LodRequirement>(), ComponentType.Exclude<Frozen>());
+            m_MissingRootLodRequirement = GetEntityQuery(typeof(MeshLODComponent), ComponentType.Exclude<RootLodRequirement>(), ComponentType.Exclude<Frozen>());
+            m_Group = GetEntityQuery(ComponentType.ReadOnly<LocalToWorld>(), ComponentType.ReadOnly<MeshLODComponent>(), typeof(LodRequirement), typeof(RootLodRequirement), ComponentType.Exclude<Frozen>());
         }
 
         protected override JobHandle OnUpdate(JobHandle dependency)
