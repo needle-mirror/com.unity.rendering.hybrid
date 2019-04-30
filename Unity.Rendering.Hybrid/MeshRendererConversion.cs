@@ -25,6 +25,7 @@ namespace Unity.Rendering
                 dst.mesh = meshFilter.sharedMesh;
                 dst.castShadows = meshRenderer.shadowCastingMode;
                 dst.receiveShadows = meshRenderer.receiveShadows;
+                dst.layer = meshRenderer.gameObject.layer;
 
     
                 //@TODO: Transform system should handle RenderMeshFlippedWindingTag automatically. This should not be the responsibility of the conversion system.

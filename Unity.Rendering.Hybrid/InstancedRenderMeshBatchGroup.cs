@@ -655,6 +655,7 @@ namespace Unity.Rendering
             var castShadows = rendererSharedComponent.castShadows;
             var receiveShadows = rendererSharedComponent.receiveShadows;
             var subMeshIndex = rendererSharedComponent.subMesh;
+            var layer = rendererSharedComponent.layer;
 
             if (mesh == null || material == null)
             {
@@ -662,7 +663,7 @@ namespace Unity.Rendering
             }
 
             Profiler.BeginSample("AddBatch");
-            int externalBatchIndex = m_BatchRendererGroup.AddBatch(mesh, subMeshIndex, material, 0, castShadows, receiveShadows, flippedWinding, bigBounds, batchInstanceCount, null, data.PickableObject, data.SceneCullingMask);
+            int externalBatchIndex = m_BatchRendererGroup.AddBatch(mesh, subMeshIndex, material, layer, castShadows, receiveShadows, flippedWinding, bigBounds, batchInstanceCount, null, data.PickableObject, data.SceneCullingMask);
             var matrices = (float4x4*) m_BatchRendererGroup.GetBatchMatrices(externalBatchIndex).GetUnsafePtr();
             Profiler.EndSample();
 

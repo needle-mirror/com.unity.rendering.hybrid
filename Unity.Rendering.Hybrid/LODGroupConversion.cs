@@ -55,7 +55,23 @@ class LODGroupConversion : GameObjectConversionSystem
                         if (DstEntityManager.HasComponent<RenderMesh>(rendererEntity))
                         {
                             var lodComponent = new MeshLODComponent { Group = lodGroupEntity, LODMask = 1 << i };
-                            DstEntityManager.AddComponentData(rendererEntity, lodComponent);
+                            if (!DstEntityManager.HasComponent<MeshLODComponent>(rendererEntity))
+                                DstEntityManager.AddComponentData(rendererEntity, lodComponent);
+                            else
+                            {
+                                var previousLODComponent = DstEntityManager.GetComponentData<MeshLODComponent>(rendererEntity);
+                                if (previousLODComponent.Group != lodComponent.Group)
+                                {
+                                    Debug.LogWarning("A renderer can not be in multiple different LODGroup.", renderer);
+                                    continue;
+                                }
+
+                                if ((previousLODComponent.LODMask & (1 << (i-1))) == 0)
+                                    Debug.LogWarning("A renderer that is present in the same LODGroup multiple times must be in consecutive LOD levels.", renderer);
+
+                                lodComponent.LODMask |= previousLODComponent.LODMask;
+                                DstEntityManager.SetComponentData(rendererEntity, lodComponent);                                   
+                            }
                         }
                     }
                 }

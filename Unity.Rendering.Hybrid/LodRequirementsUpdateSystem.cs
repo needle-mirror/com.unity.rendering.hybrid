@@ -25,47 +25,47 @@ namespace Unity.Rendering
         public LodRequirement(MeshLODGroupComponent lodGroup, LocalToWorld localToWorld, int lodMask)
         {
             var referencePoint = math.transform(localToWorld.Value, lodGroup.LocalReferencePoint);
-            float minDist = 0.0f;
-            float maxDist = 0.0f;
+            float minDist = float.MaxValue;
+            float maxDist = 0.0F;
             if ((lodMask & 0x01) == 0x01)
             {
                 minDist = 0.0f;
-                maxDist = lodGroup.LODDistances0.x;
+                maxDist = math.max(maxDist, lodGroup.LODDistances0.x);
             }
-            else if ((lodMask & 0x02) == 0x02)
+            if ((lodMask & 0x02) == 0x02)
             {
-                minDist = lodGroup.LODDistances0.x;
-                maxDist = lodGroup.LODDistances0.y;
+                minDist = math.min(minDist, lodGroup.LODDistances0.x);
+                maxDist = math.max(maxDist, lodGroup.LODDistances0.y);
             }
-            else if ((lodMask & 0x04) == 0x04)
+            if ((lodMask & 0x04) == 0x04)
             {
-                minDist = lodGroup.LODDistances0.y;
-                maxDist = lodGroup.LODDistances0.z;
+                minDist = math.min(minDist, lodGroup.LODDistances0.y);
+                maxDist = math.max(maxDist, lodGroup.LODDistances0.z);
             }
-            else if ((lodMask & 0x08) == 0x08)
+            if ((lodMask & 0x08) == 0x08)
             {
-                minDist = lodGroup.LODDistances0.z;
-                maxDist = lodGroup.LODDistances0.w;
+                minDist = math.min(minDist, lodGroup.LODDistances0.z);
+                maxDist = math.max(maxDist, lodGroup.LODDistances0.w);
             }
-            else if ((lodMask & 0x10) == 0x10)
+            if ((lodMask & 0x10) == 0x10)
             {
-                minDist = lodGroup.LODDistances0.w;
-                maxDist = lodGroup.LODDistances1.x;
+                minDist = math.min(minDist, lodGroup.LODDistances0.w);
+                maxDist = math.max(maxDist, lodGroup.LODDistances1.x);
             }
-            else if ((lodMask & 0x20) == 0x20)
+            if ((lodMask & 0x20) == 0x20)
             {
-                minDist = lodGroup.LODDistances1.x;
-                maxDist = lodGroup.LODDistances1.y;
+                minDist = math.min(minDist, lodGroup.LODDistances1.x);
+                maxDist = math.max(maxDist, lodGroup.LODDistances1.y);
             }
-            else if ((lodMask & 0x40) == 0x40)
+            if ((lodMask & 0x40) == 0x40)
             {
-                minDist = lodGroup.LODDistances1.y;
-                maxDist = lodGroup.LODDistances1.z;
+                minDist = math.min(minDist, lodGroup.LODDistances1.y);
+                maxDist = math.max(maxDist, lodGroup.LODDistances1.z);
             }
-            else if ((lodMask & 0x80) == 0x80)
+            if ((lodMask & 0x80) == 0x80)
             {
-                minDist = lodGroup.LODDistances1.z;
-                maxDist = lodGroup.LODDistances1.w;
+                minDist = math.min(minDist, lodGroup.LODDistances1.z);
+                maxDist = math.max(maxDist, lodGroup.LODDistances1.w);
             }
 
             WorldReferencePosition = referencePoint;
@@ -96,17 +96,11 @@ namespace Unity.Rendering
             public ArchetypeChunkComponentType<RootLodRequirement>              RootLodRequirement;
 
             public void Execute(ArchetypeChunk chunk, int chunkIndex, int firstEntityIndex)
-            {
-                //@TODO: Delta change...
+            {                    
                 var lodRequirement = chunk.GetNativeArray(LodRequirement);
                 var rootLodRequirement = chunk.GetNativeArray(RootLodRequirement);
                 var meshLods = chunk.GetNativeArray(MeshLODComponent);
                 var instanceCount = chunk.Count;
-
-//                var requirementCount = 0;
-//                var lastLodGroupEntity = Entity.Null;
-//                var lastLodGroupMask = 0;
-//                var uniqueLodCount = 0;
 
                 for (int i = 0; i < instanceCount; i++)
                 {
@@ -114,15 +108,6 @@ namespace Unity.Rendering
                     var lodGroupEntity = meshLod.Group;
                     var lodMask = meshLod.LODMask;
                     var lodGroup = MeshLODGroupComponent[lodGroupEntity];
-/*
-                    var sameAsLast = (lodGroupEntity == lastLodGroupEntity) && (lastLodGroupMask == lodMask);
-                    if (!sameAsLast)
-                    {
-                        uniqueLodCount++;
-                        lastLodGroupEntity = lodGroupEntity;
-                        lastLodGroupMask = lodMask;
-                    }
-*/
 
                     // Cannot take LocalToWorld from the instances, because they might not all share the same pivot
                     lodRequirement[i] = new LodRequirement(lodGroup, LocalToWorldLookup[lodGroupEntity], lodMask);
