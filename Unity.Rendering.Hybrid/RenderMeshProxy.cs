@@ -14,7 +14,7 @@ namespace Unity.Rendering
     [Serializable]
     // Culling system requires a maximum of 128 entities per chunk (See ChunkInstanceLodEnabled)
     [MaximumChunkCapacity(128)]
-    public struct RenderMesh : ISharedComponentData
+    public struct RenderMesh : ISharedComponentData, IEquatable<RenderMesh>
     {
         public Mesh                 mesh;
         public Material             material;
@@ -25,6 +25,29 @@ namespace Unity.Rendering
 
         public ShadowCastingMode    castShadows;
         public bool                 receiveShadows;
+
+        public bool Equals(RenderMesh other)
+        {
+            return
+                mesh == other.mesh &&
+                material == other.material &&
+                subMesh == other.subMesh &&
+                layer == other.layer &&
+                castShadows == other.castShadows &&
+                receiveShadows == other.receiveShadows;
+        }
+
+        public override int GetHashCode()
+        {
+            int hash = 0;
+            if (!ReferenceEquals(mesh, null)) hash ^= mesh.GetHashCode();
+            if (!ReferenceEquals(material, null)) hash ^= material.GetHashCode();
+            hash ^= subMesh.GetHashCode();
+            hash ^= layer.GetHashCode();
+            hash ^= castShadows.GetHashCode();
+            hash ^= receiveShadows.GetHashCode();
+            return hash;
+        }
     }
 
     [AddComponentMenu("DOTS/Deprecated/RenderMeshProxy-Deprecated")]

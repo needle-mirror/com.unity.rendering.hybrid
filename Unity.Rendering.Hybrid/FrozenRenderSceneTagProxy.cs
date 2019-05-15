@@ -15,6 +15,11 @@ namespace Unity.Rendering
         {
             return SceneGUID == other.SceneGUID && SectionIndex == other.SectionIndex;
         }
+
+        public override int GetHashCode()
+        {
+            return SceneGUID.GetHashCode() ^ SectionIndex;
+        }
     }
 
     [UnityEngine.AddComponentMenu("Hidden/DontUse")]
