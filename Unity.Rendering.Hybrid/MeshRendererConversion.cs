@@ -73,17 +73,6 @@ namespace Unity.Rendering
                 
                 sceneBounds.Encapsulate(meshRenderer.bounds.ToAABB());
             });
-
-            
-            using (var boundingVolume = DstEntityManager.CreateEntityQuery(typeof(SceneBoundingVolume)))
-            {
-                if (!boundingVolume.IsEmptyIgnoreFilter)
-                {
-                    var bounds = boundingVolume.GetSingleton<SceneBoundingVolume>();
-                    bounds.Value.Encapsulate(sceneBounds);
-                    boundingVolume.SetSingleton(bounds);
-                }
-            }
         }
     }
 }

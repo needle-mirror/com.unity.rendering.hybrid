@@ -1,4 +1,5 @@
-﻿using Unity.Burst;
+﻿using System.Collections.Generic;
+using Unity.Burst;
 using Unity.Collections;
 using Unity.Entities;
 using Unity.Jobs;
@@ -8,6 +9,64 @@ using UnityEngine;
 
 namespace Unity.Rendering
 {
+    /// <summary>
+    /// During conversion flow we want to generate a scene bounding volume for each section
+    /// </summary>
+    [UpdateAfter(typeof(RenderBoundsUpdateSystem))]
+    [WorldSystemFilter(WorldSystemFilterFlags.EntitySceneOptimizations)]
+    class UpdateSceneBoundingVolumeFromRendererBounds : ComponentSystem
+    {
+        [BurstCompile]
+        struct CollectSceneBoundsJob : IJob
+        {
+            [ReadOnly]
+            [DeallocateOnJobCompletion]
+            public NativeArray<WorldRenderBounds> RenderBounds;
+
+            public Entity SceneBoundsEntity;
+            public ComponentDataFromEntity<SceneBoundingVolume> SceneBounds;
+            
+            public void Execute()
+            {
+                var minMaxAabb = MinMaxAABB.Empty;
+                for (int i = 0;i != RenderBounds.Length;i++)
+                    minMaxAabb.Encapsulate(RenderBounds[i].Value);
+
+                SceneBounds[SceneBoundsEntity] = new SceneBoundingVolume { Value = minMaxAabb };
+            }
+        }
+
+        protected override void OnUpdate()
+        {
+            //@TODO: API does not allow me to use ChunkComponentData.
+            //Review with simon how we can improve it.
+            
+            var query = GetEntityQuery(typeof(WorldRenderBounds), typeof(SceneSection));
+
+            var sections = new List<SceneSection>();
+            EntityManager.GetAllUniqueSharedComponentData(sections);
+            foreach (var section in sections)
+            {
+                if (section.Equals(default(SceneSection)))
+                    continue;
+
+                query.SetFilter(section);
+
+                var entity = EntityManager.CreateEntity(typeof(SceneBoundingVolume));
+                EntityManager.AddSharedComponentData(entity, section);
+
+                var job = new CollectSceneBoundsJob();
+                job.RenderBounds = query.ToComponentDataArray<WorldRenderBounds>(Allocator.TempJob);
+                job.SceneBoundsEntity = entity;
+                job.SceneBounds = GetComponentDataFromEntity<SceneBoundingVolume>();
+                job.Run();
+            }
+            
+            query.ResetFilter();
+        }
+    }
+    
+    
     [UpdateInGroup(typeof(PresentationSystemGroup))]
     [ExecuteAlways]
     [WorldSystemFilter(WorldSystemFilterFlags.Default | WorldSystemFilterFlags.EntitySceneOptimizations)]
