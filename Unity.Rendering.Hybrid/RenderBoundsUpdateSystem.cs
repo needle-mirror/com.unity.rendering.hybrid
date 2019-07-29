@@ -70,7 +70,7 @@ namespace Unity.Rendering
     [UpdateInGroup(typeof(PresentationSystemGroup))]
     [ExecuteAlways]
     [WorldSystemFilter(WorldSystemFilterFlags.Default | WorldSystemFilterFlags.EntitySceneOptimizations)]
-    public class CreateMissingRenderBoundsFromMeshRenderer : ComponentSystem
+    public class CreateMissingRenderBoundsFromMeshRenderer : JobComponentSystem
     {
         EntityQuery m_MissingRenderBounds;
 
@@ -82,10 +82,13 @@ namespace Unity.Rendering
                 ComponentType.ReadWrite<RenderMesh>());
         }
 
-        protected override void OnUpdate()
+        protected override JobHandle OnUpdate(JobHandle inputDeps)
         {
+            inputDeps.Complete(); // #todo
+            
             var chunks = m_MissingRenderBounds.CreateArchetypeChunkArray(Allocator.TempJob);
             var archetypeChunkRenderMeshType = GetArchetypeChunkSharedComponentType<RenderMesh>();
+            var PostUpdateCommands = new EntityCommandBuffer(Allocator.TempJob);
             for (int i = 0; i < chunks.Length; ++i)
             {
                 var chunk = chunks[i];
@@ -100,6 +103,11 @@ namespace Unity.Rendering
                 }
             }
             chunks.Dispose();
+            
+            PostUpdateCommands.Playback(EntityManager);
+            PostUpdateCommands.Dispose();
+            
+            return new JobHandle();
         }
         
     }

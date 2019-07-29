@@ -58,7 +58,7 @@ namespace Unity.Rendering
     [AlwaysUpdateSystem]
     [UpdateInGroup(typeof(PresentationSystemGroup))]
     [UpdateAfter(typeof(LodRequirementsUpdateSystem))]
-    public class RenderMeshSystemV2 : ComponentSystem
+    public class RenderMeshSystemV2 : JobComponentSystem
     {
         int m_LastFrozenChunksOrderVersion = -1;
 
@@ -282,8 +282,10 @@ namespace Unity.Rendering
         }
 
 
-        protected override void OnUpdate()
+        protected override JobHandle OnUpdate(JobHandle inputDeps)
         {
+            inputDeps.Complete(); // #todo
+            
             m_InstancedRenderMeshBatchGroup.CompleteJobs();
             m_InstancedRenderMeshBatchGroup.ResetLod();
 
@@ -296,6 +298,8 @@ namespace Unity.Rendering
             Profiler.EndSample();
 
             m_InstancedRenderMeshBatchGroup.LastUpdatedOrderVersion = EntityManager.GetComponentOrderVersion<RenderMesh>();
+            
+            return new JobHandle();
         }
 
 #if UNITY_EDITOR

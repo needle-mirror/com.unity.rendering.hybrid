@@ -10,10 +10,22 @@
         "Unity.Jobs",
         "Unity.Mathematics",
         "Unity.Mathematics.Extensions",
-        "Unity.Mathematics.Extensions.Hybrid"
+        "Unity.Mathematics.Extensions.Hybrid",
+        "Unity.RenderPipelines.HighDefinition.Runtime"
     ],
     "optionalUnityReferences": [],
     "includePlatforms": [],
     "excludePlatforms": [],
-    "allowUnsafeCode": true
+    "allowUnsafeCode": true,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [
+        {
+            "name": "com.unity.render-pipelines.high-definition",
+            "expression": "0.0.0",
+            "define": "HDRP_EXISTS"
+        }
+    ]
 }

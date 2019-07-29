@@ -1,7 +1,6 @@
 ﻿using System.Collections;
 using NUnit.Framework;
 using Unity.Entities;
-using Unity.Entities.Tests;
 using Unity.Rendering;
 using Unity.Scenes.Editor;
 using UnityEditor;
@@ -11,7 +10,7 @@ using UnityEngine.TestTools;
 
 namespace Unity.Scenes.Tests
 {
-    public class EndToEndStreaming : ECSTestsFixture
+    public class EndToEndStreaming
     {
         // Load / unload scene
         // Enter live link
@@ -21,138 +20,143 @@ namespace Unity.Scenes.Tests
         [UnityTest]
         public IEnumerator LodSplitOverSections()
         {
-            var guid = GUID.Generate();
-            var temp = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene);
-            EditorSceneManager.SetActiveScene(temp);
-
-            // Large set of dummy entities to stress the public ref array
-            const int dummyCount = 100;
-            for (int i = 0; i < dummyCount; ++i)
-                new GameObject($"Dummy {i}");
-
-            var lod0Renderer = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            var lod1Renderer = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            var lod2Renderer = GameObject.CreatePrimitive(PrimitiveType.Cube);
-
-            lod0Renderer.transform.position = new Vector3(0, 0, 0);
-            lod1Renderer.transform.position = new Vector3(1, 0, 0);
-            lod2Renderer.transform.position = new Vector3(2, 0, 0);
-
-            var highLod = new GameObject("HighLOD");
-            highLod.SetActive(false);
-            var highLodGroup = highLod.AddComponent<LODGroup>();
-
-            var lowLod = new GameObject("LowLOD");
-            lowLod.SetActive(false);
-            var lowLodGroup = lowLod.AddComponent<LODGroup>();
-
-            var hlod = new GameObject("HLOD");
-            hlod.SetActive(false);
-            var hlodComponent = hlod.AddComponent<HLOD>();
-            var hlodGroup = hlod.GetComponent<LODGroup>();
-
-            lod0Renderer.transform.parent = highLod.transform;
-            lod1Renderer.transform.parent = highLod.transform;
-            lod2Renderer.transform.parent = lowLod.transform;
-
-            highLod.transform.parent = hlod.transform;
-            lowLod.transform.parent = hlod.transform;
-
-            highLodGroup.SetLODs(new[]
+            using (var world = new World("TestWorld"))
             {
-                new LOD(0.75f, new[] {lod0Renderer.GetComponent<Renderer>()}),
-                new LOD(0.00f, new[] {lod1Renderer.GetComponent<Renderer>()}),
-            });
+                var entityManager = world.EntityManager;
 
-            lowLodGroup.SetLODs(new[]
-            {
-                new LOD(0.00f, new[] {lod2Renderer.GetComponent<Renderer>()}),
-            });
+                var guid = GUID.Generate();
+                var temp = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene);
+                EditorSceneManager.SetActiveScene(temp);
 
-            hlodComponent.LODParentTransforms = new[] {highLod.transform, lowLod.transform};
-            hlodGroup.SetLODs(new[]
-            {
-                new LOD(0.25f, new Renderer[]{}),
-                new LOD(0.00f, new Renderer[]{}),
-            });
+                // Large set of dummy entities to stress the public ref array
+                const int dummyCount = 100;
+                for (int i = 0; i < dummyCount; ++i)
+                    new GameObject($"Dummy {i}");
 
-            highLod.SetActive(true);
-            lowLod.SetActive(true);
-            hlod.SetActive(true);
+                var lod0Renderer = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                var lod1Renderer = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                var lod2Renderer = GameObject.CreatePrimitive(PrimitiveType.Cube);
 
-            var entitySceneData = EditorEntityScenes.WriteEntityScene(temp, guid, 0);
-            Assert.AreEqual(2, entitySceneData.Length);
-        
-            var sceneEntitySection0 = m_Manager.CreateEntity();
-            m_Manager.AddComponentData(sceneEntitySection0, entitySceneData[0]);
+                lod0Renderer.transform.position = new Vector3(0, 0, 0);
+                lod1Renderer.transform.position = new Vector3(1, 0, 0);
+                lod2Renderer.transform.position = new Vector3(2, 0, 0);
 
-            var sceneEntitySection1 = m_Manager.CreateEntity();
-            m_Manager.AddComponentData(sceneEntitySection1, entitySceneData[1]);
+                var highLod = new GameObject("HighLOD");
+                highLod.SetActive(false);
+                var highLodGroup = highLod.AddComponent<LODGroup>();
 
-            // Loading one scene at a time
-            for (int i = 0; i != 10; i++)
-            {
-                Assert.AreEqual(2, m_Manager.Debug.EntityCount);
+                var lowLod = new GameObject("LowLOD");
+                lowLod.SetActive(false);
+                var lowLodGroup = lowLod.AddComponent<LODGroup>();
 
-                m_Manager.AddComponentData(sceneEntitySection0, new RequestSceneLoaded());
+                var hlod = new GameObject("HLOD");
+                hlod.SetActive(false);
+                var hlodComponent = hlod.AddComponent<HLOD>();
+                var hlodGroup = hlod.GetComponent<LODGroup>();
 
-                for (int w = 0; w != 1000; w++)
+                lod0Renderer.transform.parent = highLod.transform;
+                lod1Renderer.transform.parent = highLod.transform;
+                lod2Renderer.transform.parent = lowLod.transform;
+
+                highLod.transform.parent = hlod.transform;
+                lowLod.transform.parent = hlod.transform;
+
+                highLodGroup.SetLODs(new[]
                 {
-                    World.GetOrCreateSystem<SubSceneStreamingSystem>().Update();
-                    if (2 != m_Manager.Debug.EntityCount)
-                        break;
+                    new LOD(0.75f, new[] {lod0Renderer.GetComponent<Renderer>()}),
+                    new LOD(0.00f, new[] {lod1Renderer.GetComponent<Renderer>()}),
+                });
 
-                    Assert.AreNotEqual(999, w, "Streaming is stuck");
-
-                    yield return null;
-                }
-
-                // 1. Scene entity section 0
-                // 2. Scene entity section 1
-                // 3. Public ref array
-                // 4. HLOD
-                // 5. LowLod group
-                // 6. LOD2 renderer
-                Assert.AreEqual(dummyCount + 6, m_Manager.Debug.EntityCount);
-
-                // Destroying and recreating the system causes the streaming worlds to reset, otherwise oversize
-                // buffers could carry over and would not trigger the right asserts.
-                World.DestroySystem(World.GetExistingSystem<SubSceneStreamingSystem>());
-
-                m_Manager.AddComponentData(sceneEntitySection1, new RequestSceneLoaded());
-
-                for (int w = 0; w != 1000; w++)
+                lowLodGroup.SetLODs(new[]
                 {
-                    World.GetOrCreateSystem<SubSceneStreamingSystem>().Update();
-                    if (dummyCount + 6 != m_Manager.Debug.EntityCount)
-                        break;
+                    new LOD(0.00f, new[] {lod2Renderer.GetComponent<Renderer>()}),
+                });
 
-                    Assert.AreNotEqual(999, w, "Streaming is stuck");
+                hlodComponent.LODParentTransforms = new[] {highLod.transform, lowLod.transform};
+                hlodGroup.SetLODs(new[]
+                {
+                    new LOD(0.25f, new Renderer[] { }),
+                    new LOD(0.00f, new Renderer[] { }),
+                });
 
-                    yield return null;
+                highLod.SetActive(true);
+                lowLod.SetActive(true);
+                hlod.SetActive(true);
+
+                var entitySceneData = EditorEntityScenes.WriteEntityScene(temp, guid);
+                Assert.AreEqual(2, entitySceneData.Length);
+
+                var sceneEntitySection0 = entityManager.CreateEntity();
+                entityManager.AddComponentData(sceneEntitySection0, entitySceneData[0]);
+
+                var sceneEntitySection1 = entityManager.CreateEntity();
+                entityManager.AddComponentData(sceneEntitySection1, entitySceneData[1]);
+
+                // Loading one scene at a time
+                for (int i = 0; i != 10; i++)
+                {
+                    Assert.AreEqual(2, entityManager.Debug.EntityCount);
+
+                    entityManager.AddComponentData(sceneEntitySection0, new RequestSceneLoaded());
+
+                    for (int w = 0; w != 1000; w++)
+                    {
+                        world.GetOrCreateSystem<SubSceneStreamingSystem>().Update();
+                        if (2 != entityManager.Debug.EntityCount)
+                            break;
+
+                        Assert.AreNotEqual(999, w, "Streaming is stuck");
+
+                        yield return null;
+                    }
+
+                    // 1. Scene entity section 0
+                    // 2. Scene entity section 1
+                    // 3. Public ref array
+                    // 4. HLOD
+                    // 5. LowLod group
+                    // 6. LOD2 renderer
+                    Assert.AreEqual(dummyCount + 6, entityManager.Debug.EntityCount);
+
+                    // Destroying and recreating the system causes the streaming worlds to reset, otherwise oversize
+                    // buffers could carry over and would not trigger the right asserts.
+                    world.DestroySystem(world.GetExistingSystem<SubSceneStreamingSystem>());
+
+                    entityManager.AddComponentData(sceneEntitySection1, new RequestSceneLoaded());
+
+                    for (int w = 0; w != 1000; w++)
+                    {
+                        world.GetOrCreateSystem<SubSceneStreamingSystem>().Update();
+                        if (dummyCount + 6 != entityManager.Debug.EntityCount)
+                            break;
+
+                        Assert.AreNotEqual(999, w, "Streaming is stuck");
+
+                        yield return null;
+                    }
+
+                    // 1. Scene entity section 0
+                    // 2. Scene entity section 1
+                    // 3. Public ref array
+                    // 4. HLOD
+                    // 5. LowLod group
+                    // 6. LOD2 renderer
+                    // 7. External ref array
+                    // 8. HighLod group
+                    // 9. LOD1 renderer
+                    // A. LOD0 renderer
+                    Assert.AreEqual(dummyCount + 10, entityManager.Debug.EntityCount);
+
+                    entityManager.RemoveComponent<RequestSceneLoaded>(sceneEntitySection1);
+                    world.GetOrCreateSystem<SubSceneStreamingSystem>().Update();
+
+                    Assert.AreEqual(dummyCount + 6, entityManager.Debug.EntityCount);
+
+                    entityManager.RemoveComponent<RequestSceneLoaded>(sceneEntitySection0);
+                    world.GetOrCreateSystem<SubSceneStreamingSystem>().Update();
+
+                    Assert.AreEqual(2, entityManager.Debug.EntityCount);
                 }
-
-                // 1. Scene entity section 0
-                // 2. Scene entity section 1
-                // 3. Public ref array
-                // 4. HLOD
-                // 5. LowLod group
-                // 6. LOD2 renderer
-                // 7. External ref array
-                // 8. HighLod group
-                // 9. LOD1 renderer
-                // A. LOD0 renderer
-                Assert.AreEqual(dummyCount + 10, m_Manager.Debug.EntityCount);
-
-                m_Manager.RemoveComponent<RequestSceneLoaded>(sceneEntitySection1);
-                World.GetOrCreateSystem<SubSceneStreamingSystem>().Update();
-
-                Assert.AreEqual(dummyCount + 6, m_Manager.Debug.EntityCount);
-
-                m_Manager.RemoveComponent<RequestSceneLoaded>(sceneEntitySection0);
-                World.GetOrCreateSystem<SubSceneStreamingSystem>().Update();
-
-                Assert.AreEqual(2, m_Manager.Debug.EntityCount);
             }
         }
     }

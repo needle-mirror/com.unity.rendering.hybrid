@@ -1,17 +1,22 @@
 {
-    "displayName": "Hybrid Renderer", 
-    "name": "com.unity.rendering.hybrid", 
-    "unity": "2019.1", 
-    "version": "0.0.1-preview.13", 
-    "unityRelease": "0f1", 
-    "keywords": [
-        "entities", 
-        "unity", 
-        "hybrid", 
-        "rendering"
-    ], 
-    "dependencies": {
-        "com.unity.entities": "0.0.12-preview.33"
-    }, 
-    "description": "Core components and systems for drawing meshes using ECS, including instanced mesh rendering and LOD"
+  "name": "com.unity.rendering.hybrid",
+  "displayName": "Hybrid Renderer",
+  "version": "0.1.0-preview",
+  "unity": "2019.1",
+  "unityRelease": "0f1",
+  "description": "The Hybrid Rendering package provides systems and components for drawing meshes using DOTS, including support for instanced mesh rendering and LOD.",
+  "dependencies": {
+    "com.unity.entities": "0.1.0-preview"
+  },
+  "keywords": [
+    "dots",
+    "hybrid",
+    "rendering",
+    "unity"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git@github.com:Unity-Technologies/dots.git",
+    "revision": "162cf91d95234dfe16343d3f4d2c44f321086d76"
+  }
 }

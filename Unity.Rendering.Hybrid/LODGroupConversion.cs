@@ -49,7 +49,10 @@ class LODGroupConversion : GameObjectConversionSystem
                         Debug.LogWarning("Missing renderer in LOD Group", lodGroup);
                         continue;
                     }
-                
+                                    
+                    DeclareDependency(renderer, lodGroup);
+                    DeclareDependency(lodGroup, renderer);
+                    
                     foreach (var rendererEntity in GetEntities(renderer))
                     {
                         if (DstEntityManager.HasComponent<RenderMesh>(rendererEntity))
@@ -78,4 +81,5 @@ class LODGroupConversion : GameObjectConversionSystem
             }
         });
     }
+
 }
