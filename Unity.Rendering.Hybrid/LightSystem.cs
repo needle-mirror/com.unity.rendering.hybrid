@@ -1,14 +1,17 @@
 //#define LIGHT_DEBUG
-
+ 
 using System.Collections.Generic;
 using Unity.Collections;
 using Unity.Entities;
 using Unity.Profiling;
 using Unity.Transforms;
 using UnityEngine;
-#if HDRP_EXISTS
+
+#if HDRP_6_EXISTS
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Experimental.Rendering.HDPipeline;
+#elif HDRP_7_EXISTS
+using UnityEngine.Rendering.HighDefinition;
 #endif
 
 namespace Unity.Rendering
@@ -22,9 +25,11 @@ namespace Unity.Rendering
     {
         public GameObject m_Object;
         public Light m_Light;
-#if HDRP_EXISTS
+#if HDRP_6_EXISTS
         public HDAdditionalLightData m_HdData;
-        public AdditionalShadowData m_HdShadow;
+        public AdditionalShadowData m_HdShadow;        
+#elif HDRP_7_EXISTS
+        public HDAdditionalLightData m_HdData;
 #endif
         public Entity m_Entity;
     }
@@ -48,23 +53,28 @@ namespace Unity.Rendering
         protected override void OnCreate()
         {
             m_DeletedLights = GetEntityQuery(
-                ComponentType.Exclude<LightComponent>(),
-                ComponentType.ReadOnly<LightSystemData>());
-
+            new EntityQueryDesc
+            {
+                All = new[] {ComponentType.ReadOnly<LightSystemData>()},
+                None = new[] {ComponentType.ReadOnly<LightComponent>()},
+            },
+            new EntityQueryDesc
+            {
+                All = new[] {ComponentType.ReadOnly<LightSystemData>(), ComponentType.ReadOnly<Disabled>()},
+            });
+            
             m_NewLights = GetEntityQuery(
                 ComponentType.ReadOnly<LightComponent>(),
-#if HDRP_EXISTS
+#if HDRP_6_EXISTS || HDRP_7_EXISTS
                 ComponentType.ReadOnly<HDLightData>(),
-                ComponentType.ReadOnly<HDShadowData>(),
 #endif
                 ComponentType.ReadOnly<LocalToWorld>(),
                 ComponentType.Exclude<LightSystemData>());
 
             m_ActiveLights = GetEntityQuery(
                 ComponentType.ReadOnly<LightComponent>(),
-#if HDRP_EXISTS
+#if HDRP_6_EXISTS || HDRP_7_EXISTS
                 ComponentType.ReadOnly<HDLightData>(),
-                ComponentType.ReadOnly<HDShadowData>(),
 #endif
                 ComponentType.ReadOnly<LocalToWorld>(),
                 ComponentType.ReadOnly<LightSystemData>());
@@ -120,9 +130,11 @@ namespace Unity.Rendering
                 {
                     m_Object = GO,
                     m_Light = GO.AddComponent<UnityEngine.Light>(),
-#if HDRP_EXISTS
+#if HDRP_6_EXISTS
                     m_HdData = GO.AddComponent<HDAdditionalLightData>(),
                     m_HdShadow = GO.AddComponent<AdditionalShadowData>(),
+#elif HDRP_7_EXISTS
+                    m_HdData = GO.AddComponent<HDAdditionalLightData>(),
 #endif
                 };
 
@@ -141,9 +153,8 @@ namespace Unity.Rendering
             var chunkLocalToWorldType = GetArchetypeChunkComponentType<LocalToWorld>(true);
             var chunkLightComponentType = GetArchetypeChunkComponentType<LightComponent>(true);
             var chunkLightCookieType = GetArchetypeChunkSharedComponentType<LightCookie>();
-#if HDRP_EXISTS
+#if HDRP_6_EXISTS || HDRP_7_EXISTS
             var chunkHdDataType = GetArchetypeChunkComponentType<HDLightData>(true);
-            var chunkHdShadowType = GetArchetypeChunkComponentType<HDShadowData>(true);
 #endif
 
             for (int i = 0; i < chunks.Length; ++i)
@@ -153,9 +164,8 @@ namespace Unity.Rendering
                 var chunkEntities = chunk.GetNativeArray(chunkEntityType);
                 var chunkLocalToWorlds = chunk.GetNativeArray(chunkLocalToWorldType);
                 var chunkLightComponents = chunk.GetNativeArray(chunkLightComponentType);
-#if HDRP_EXISTS
+#if HDRP_6_EXISTS || HDRP_7_EXISTS
                 var chunkHdDatas = chunk.GetNativeArray(chunkHdDataType);
-                var chunkHdShadows = chunk.GetNativeArray(chunkHdShadowType);
 #endif
 
                 bool hasCookie = chunk.Has(chunkLightCookieType);
@@ -182,15 +192,17 @@ namespace Unity.Rendering
                         UpdateUnityLightCookie(unityLight, cookie);
                     }
 
-#if HDRP_EXISTS
+#if HDRP_6_EXISTS
+                    // HD light data
+                    var unityHdData = m_UnityLights[poolIndex].m_HdData;
+                    var unityHdShadow = m_UnityLights[poolIndex].m_HdShadow;
+                    HDAdditionalLightData.InitDefaultHDAdditionalLightData(unityHdData);
+                    UpdateUnityHdData(unityHdData, unityHdShadow, chunkHdDatas[j]);
+#elif HDRP_7_EXISTS
                     // HD light data
                     var unityHdData = m_UnityLights[poolIndex].m_HdData;
                     HDAdditionalLightData.InitDefaultHDAdditionalLightData(unityHdData);
                     UpdateUnityHdData(unityHdData, chunkHdDatas[j]);
-
-                    // HD shadow data
-                    var unityHdShadow = m_UnityLights[poolIndex].m_HdShadow;
-                    UpdateUnityHdShadow(unityHdShadow, chunkHdShadows[j]);
 #endif
 
                     var lightSystemData = new LightSystemData { LightPoolIndex = poolIndex };
@@ -211,9 +223,8 @@ namespace Unity.Rendering
             var chunkLocalToWorldType = GetArchetypeChunkComponentType<LocalToWorld>(true);
             var chunkLightComponentType = GetArchetypeChunkComponentType<LightComponent>(true);
             var chunkLightCookieType = GetArchetypeChunkSharedComponentType<LightCookie>();
-#if HDRP_EXISTS
+#if HDRP_6_EXISTS || HDRP_7_EXISTS
             var chunkHdDataType = GetArchetypeChunkComponentType<HDLightData>(true);
-            var chunkHdShadowType = GetArchetypeChunkComponentType<HDShadowData>(true);
 #endif
 
             for (int i = 0; i < chunks.Length; ++i)
@@ -258,7 +269,18 @@ namespace Unity.Rendering
                     }
                 }
 
-#if HDRP_EXISTS
+#if HDRP_6_EXISTS
+                // HD light data
+                if (chunk.DidChange(chunkHdDataType, LastSystemVersion))
+                {
+                    var chunkHdDatas = chunk.GetNativeArray(chunkHdDataType);
+                    for (int j = 0; j < chunk.Count; ++j)
+                    {
+                        int poolIndex = chunkLightSystemDatas[j].LightPoolIndex;
+                        UpdateUnityHdData(m_UnityLights[poolIndex].m_HdData, m_UnityLights[poolIndex].m_HdShadow, chunkHdDatas[j]);
+                    }
+                }
+#elif HDRP_7_EXISTS
                 // HD light data
                 if (chunk.DidChange(chunkHdDataType, LastSystemVersion))
                 {
@@ -267,17 +289,6 @@ namespace Unity.Rendering
                     {
                         int poolIndex = chunkLightSystemDatas[j].LightPoolIndex;
                         UpdateUnityHdData(m_UnityLights[poolIndex].m_HdData, chunkHdDatas[j]);
-                    }
-                }
-
-                // HD shadow data
-                if (chunk.DidChange(chunkHdShadowType, LastSystemVersion))
-                {
-                    var chunkHdShadows = chunk.GetNativeArray(chunkHdShadowType);
-                    for (int j = 0; j < chunk.Count; ++j)
-                    {
-                        int poolIndex = chunkLightSystemDatas[j].LightPoolIndex;
-                        UpdateUnityHdShadow(m_UnityLights[poolIndex].m_HdShadow, chunkHdShadows[j]);
                     }
                 }
 #endif
@@ -316,7 +327,48 @@ namespace Unity.Rendering
             unityLight.cookie = cookie.texture;
         }
 
-#if HDRP_EXISTS
+#if HDRP_6_EXISTS
+        private static void UpdateUnityHdData(HDAdditionalLightData unityHdData, AdditionalShadowData unityShadowData, HDLightData hdData)
+        {
+            unityHdData.lightTypeExtent = hdData.lightTypeExtent;
+            unityHdData.lightDimmer = hdData.lightDimmer;
+            unityHdData.fadeDistance = hdData.fadeDistance;
+            unityHdData.affectDiffuse = hdData.affectDiffuse;
+            unityHdData.affectSpecular = hdData.affectSpecular;
+            unityHdData.shapeWidth = hdData.shapeWidth;
+            unityHdData.shapeHeight = hdData.shapeHeight;
+            unityHdData.aspectRatio = hdData.aspectRatio;
+            unityHdData.shapeRadius = hdData.shapeRadius;
+            unityHdData.maxSmoothness = hdData.maxSmoothness;
+            unityHdData.applyRangeAttenuation = hdData.applyRangeAttenuation;
+
+            // Spot light specific
+            // NOTE: Can't add branch here, because HD light doesn't itself know whether it's a spot. That's stored in Unity.Light.
+            unityHdData.enableSpotReflector = hdData.enableSpotReflector;
+            unityHdData.m_InnerSpotPercent = hdData.innerSpotPercent;
+            unityHdData.spotLightShape = hdData.spotLightShape;
+
+            // Intensity is a property. It setups lots of things and assumes data is already set. Must be called last!
+            unityHdData.intensity = hdData.intensity;
+
+            // HDShadowData
+            unityShadowData.shadowResolution = hdData.shadowResolution;
+            unityShadowData.shadowDimmer = hdData.shadowDimmer;
+            unityShadowData.volumetricShadowDimmer = hdData.volumetricShadowDimmer;
+            unityShadowData.shadowFadeDistance = hdData.shadowFadeDistance;
+            unityShadowData.contactShadows = hdData.contactShadows;
+            unityShadowData.viewBiasMin = hdData.viewBiasMin;
+            unityShadowData.viewBiasMax = hdData.viewBiasMax;
+            unityShadowData.viewBiasScale = hdData.viewBiasScale;
+            unityShadowData.normalBiasMin = hdData.normalBiasMin;
+            unityShadowData.normalBiasMax = hdData.normalBiasMax;
+            unityShadowData.normalBiasScale = hdData.normalBiasScale;
+            unityShadowData.sampleBiasScale = hdData.sampleBiasScale;
+            unityShadowData.edgeLeakFixup = hdData.edgeLeakFixup;
+            unityShadowData.edgeToleranceNormal = hdData.edgeToleranceNormal;
+            unityShadowData.edgeTolerance = hdData.edgeTolerance;
+        }
+#elif HDRP_7_EXISTS
         private static void UpdateUnityHdData(HDAdditionalLightData unityHdData, HDLightData hdData)
         {
             unityHdData.lightTypeExtent         = hdData.lightTypeExtent;
@@ -334,30 +386,22 @@ namespace Unity.Rendering
             // Spot light specific
             // NOTE: Can't add branch here, because HD light doesn't itself know whether it's a spot. That's stored in Unity.Light.
             unityHdData.enableSpotReflector     = hdData.enableSpotReflector;
-            unityHdData.m_InnerSpotPercent      = hdData.innerSpotPercent;
+            unityHdData.innerSpotPercent        = hdData.innerSpotPercent;
             unityHdData.spotLightShape          = hdData.spotLightShape;
+
+            // Shadow data   
+            unityHdData.customResolution = hdData.customResolution;
+            unityHdData.shadowDimmer = hdData.shadowDimmer;
+            unityHdData.volumetricShadowDimmer = hdData.volumetricShadowDimmer;
+            unityHdData.shadowFadeDistance = hdData.shadowFadeDistance;
+            unityHdData.contactShadows = hdData.contactShadows;
+            unityHdData.shadowTint = hdData.shadowTint;
+            unityHdData.normalBias = hdData.normalBias;
+            unityHdData.constantBias = hdData.constantBias;
+            unityHdData.shadowUpdateMode = hdData.shadowUpdateMode;
 
             // Intensity is a property. It setups lots of things and assumes data is already set. Must be called last!
             unityHdData.intensity               = hdData.intensity;
-        }
-
-        private static void UpdateUnityHdShadow(AdditionalShadowData unityShadowData, HDShadowData hdShadow)
-        {
-            unityShadowData.shadowResolution         = hdShadow.shadowResolution;
-            unityShadowData.shadowDimmer             = hdShadow.shadowDimmer;
-            unityShadowData.volumetricShadowDimmer   = hdShadow.volumetricShadowDimmer;
-            unityShadowData.shadowFadeDistance       = hdShadow.shadowFadeDistance;
-            unityShadowData.contactShadows           = hdShadow.contactShadows;
-            unityShadowData.viewBiasMin              = hdShadow.viewBiasMin;
-            unityShadowData.viewBiasMax              = hdShadow.viewBiasMax;
-            unityShadowData.viewBiasScale            = hdShadow.viewBiasScale;
-            unityShadowData.normalBiasMin            = hdShadow.normalBiasMin;
-            unityShadowData.normalBiasMax            = hdShadow.normalBiasMax;
-            unityShadowData.normalBiasScale          = hdShadow.normalBiasScale;
-            unityShadowData.sampleBiasScale          = hdShadow.sampleBiasScale;
-            unityShadowData.edgeLeakFixup            = hdShadow.edgeLeakFixup;
-            unityShadowData.edgeToleranceNormal      = hdShadow.edgeToleranceNormal;
-            unityShadowData.edgeTolerance            = hdShadow.edgeTolerance;
         }
 #endif
     }

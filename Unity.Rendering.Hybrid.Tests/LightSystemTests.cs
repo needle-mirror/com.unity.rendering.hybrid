@@ -3,9 +3,12 @@ using Unity.Entities;
 using Unity.Mathematics;
 using Unity.Transforms;
 using UnityEngine;
-#if HDRP_EXISTS
+ 
+#if HDRP_6_EXISTS
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Experimental.Rendering.HDPipeline;
+#elif HDRP_7_EXISTS
+using UnityEngine.Rendering.HighDefinition;
 #endif
 
 namespace Unity.Rendering.Tests
@@ -42,44 +45,69 @@ namespace Unity.Rendering.Tests
             light.shadowStrength            = 1.0f;
             world.EntityManager.AddComponentData(entity, light);
 
-#if HDRP_EXISTS
             // Optional dependency to com.unity.render-pipelines.high-definition
+#if HDRP_6_EXISTS
             HDLightData hdData;
-            hdData.lightTypeExtent          = UnityEngine.Experimental.Rendering.HDPipeline.LightTypeExtent.Punctual;
-            hdData.intensity                = 100.0f;
-            hdData.lightDimmer              = 1.0f;
-            hdData.fadeDistance             = 1.0f;
-            hdData.affectDiffuse            = true;
-            hdData.affectSpecular           = true;
-            hdData.shapeWidth               = 5.0f;
-            hdData.shapeHeight              = 5.0f;
-            hdData.aspectRatio              = 1.0f;
-            hdData.shapeRadius              = 5.0f;
-            hdData.maxSmoothness            = 0.5f;
-            hdData.applyRangeAttenuation    = true;
-            hdData.spotLightShape           = UnityEngine.Experimental.Rendering.HDPipeline.SpotLightShape.Cone;
-            hdData.enableSpotReflector      = false;
-            hdData.innerSpotPercent         = 50.0f;
+            hdData.lightTypeExtent = UnityEngine.Experimental.Rendering.HDPipeline.LightTypeExtent.Punctual;
+            hdData.intensity = 100.0f;
+            hdData.lightDimmer = 1.0f;
+            hdData.fadeDistance = 1.0f;
+            hdData.affectDiffuse = true;
+            hdData.affectSpecular = true;
+            hdData.shapeWidth = 5.0f;
+            hdData.shapeHeight = 5.0f;
+            hdData.aspectRatio = 1.0f;
+            hdData.shapeRadius = 5.0f;
+            hdData.maxSmoothness = 0.5f;
+            hdData.applyRangeAttenuation = true;
+            hdData.spotLightShape = UnityEngine.Experimental.Rendering.HDPipeline.SpotLightShape.Cone;
+            hdData.enableSpotReflector = false;
+            hdData.innerSpotPercent = 50.0f;
+            hdData.shadowResolution = 256;
+            hdData.shadowDimmer = 1.0f;
+            hdData.volumetricShadowDimmer = 1.0f;
+            hdData.shadowFadeDistance = 100.0f;
+            hdData.contactShadows = false;
+            hdData.viewBiasMin = 0.0f;
+            hdData.viewBiasMax = 1.0f;
+            hdData.viewBiasScale = 1.0f;
+            hdData.normalBiasMin = 0.0f;
+            hdData.normalBiasMax = 1.0f;
+            hdData.normalBiasScale = 1.0f;
+            hdData.sampleBiasScale = false;
+            hdData.sampleBiasScale = false;
+            hdData.edgeLeakFixup = false;
+            hdData.edgeToleranceNormal = false;
+            hdData.edgeTolerance = 0.0f;
             world.EntityManager.AddComponentData(entity, hdData);
+#elif HDRP_7_EXISTS
+            HDLightData hdData;
+            hdData.lightTypeExtent = LightTypeExtent.Punctual;
+            hdData.intensity = 100.0f;
+            hdData.lightDimmer = 1.0f;
+            hdData.fadeDistance = 1.0f;
+            hdData.affectDiffuse = true;
+            hdData.affectSpecular = true;
+            hdData.shapeWidth = 5.0f;
+            hdData.shapeHeight = 5.0f;
+            hdData.aspectRatio = 1.0f;
+            hdData.shapeRadius = 5.0f;
+            hdData.maxSmoothness = 0.5f;
+            hdData.applyRangeAttenuation = true;
+            hdData.spotLightShape = SpotLightShape.Cone;
+            hdData.enableSpotReflector = false;
+            hdData.innerSpotPercent = 50.0f;
+            hdData.customResolution = 256;
+            hdData.shadowDimmer = 1.0f;
+            hdData.volumetricShadowDimmer = 1.0f;
+            hdData.shadowFadeDistance = 100.0f;
+            hdData.contactShadows = false;
+            hdData.shadowTint = Color.white;
+            hdData.normalBias = 0.0f;
+            hdData.constantBias = 0.0f;
+            hdData.shadowUpdateMode = ShadowUpdateMode.EveryFrame;
 
-            HDShadowData hdShadow;
-            hdShadow.shadowResolution         = 256;
-            hdShadow.shadowDimmer             = 1.0f;
-            hdShadow.volumetricShadowDimmer   = 1.0f;
-            hdShadow.shadowFadeDistance       = 100.0f;
-            hdShadow.contactShadows           = false;
-            hdShadow.viewBiasMin              = 0.0f;
-            hdShadow.viewBiasMax              = 1.0f;
-            hdShadow.viewBiasScale            = 1.0f;
-            hdShadow.normalBiasMin            = 0.0f;
-            hdShadow.normalBiasMax            = 1.0f;
-            hdShadow.normalBiasScale          = 1.0f;
-            hdShadow.sampleBiasScale          = false;
-            hdShadow.sampleBiasScale          = false;
-            hdShadow.edgeLeakFixup            = false;
-            hdShadow.edgeToleranceNormal      = false;
-            hdShadow.edgeTolerance            = 0.0f;
-            world.EntityManager.AddComponentData(entity, hdShadow);
+            world.EntityManager.AddComponentData(entity, hdData);
 #endif
 
             var lightSystem = world.CreateSystem<LightSystem>();
@@ -92,64 +120,91 @@ namespace Unity.Rendering.Tests
             Assert.NotNull(unityLight, "Can't find generated pooled light component");
             Assert.AreEqual(true, unityLight.enabled, "Pooled light is not enabled");
 
-            Assert.AreEqual(light.type,                     unityLight.type                     );
-            Assert.AreEqual(light.color,                    unityLight.color                    );
-            Assert.AreEqual(light.colorTemperature,         unityLight.colorTemperature         );
-            Assert.AreEqual(light.range,                    unityLight.range                    );
+            Assert.AreEqual(light.type, unityLight.type);
+            Assert.AreEqual(light.color, unityLight.color);
+            Assert.AreEqual(light.colorTemperature, unityLight.colorTemperature);
+            Assert.AreEqual(light.range, unityLight.range);
             //Assert.AreEqual(light.intensity,              unityLight.intensity                );       // HDRP will potentially override this. Not reliable to test!
-            Assert.AreEqual(light.cullingMask,              unityLight.cullingMask              );
-            Assert.AreEqual(light.renderingLayerMask,       unityLight.renderingLayerMask       );
+            Assert.AreEqual(light.cullingMask, unityLight.cullingMask);
+            Assert.AreEqual(light.renderingLayerMask, unityLight.renderingLayerMask);
             if (light.type == LightType.Spot)
-            { 
-                Assert.AreEqual(light.spotAngle,            unityLight.spotAngle                );
-                Assert.AreEqual(light.innerSpotAngle,       unityLight.innerSpotAngle           );
+            {
+                Assert.AreEqual(light.spotAngle, unityLight.spotAngle);
+                Assert.AreEqual(light.innerSpotAngle, unityLight.innerSpotAngle);
             }
-            Assert.AreEqual(light.shadows,                  unityLight.shadows                  );
-            Assert.AreEqual(light.shadowCustomResolution,   unityLight.shadowCustomResolution   );
-            Assert.AreEqual(light.shadowNearPlane,          unityLight.shadowNearPlane          );
-            Assert.AreEqual(light.shadowBias,               unityLight.shadowBias               );
-            Assert.AreEqual(light.shadowNormalBias,         unityLight.shadowNormalBias         );
-            Assert.AreEqual(light.shadowStrength,           unityLight.shadowStrength           );
+            Assert.AreEqual(light.shadows, unityLight.shadows);
+            Assert.AreEqual(light.shadowCustomResolution, unityLight.shadowCustomResolution);
+            Assert.AreEqual(light.shadowNearPlane, unityLight.shadowNearPlane);
+            Assert.AreEqual(light.shadowBias, unityLight.shadowBias);
+            Assert.AreEqual(light.shadowNormalBias, unityLight.shadowNormalBias);
+            Assert.AreEqual(light.shadowStrength, unityLight.shadowStrength);
 
-#if HDRP_EXISTS
+#if HDRP_6_EXISTS
             var unityHDData = lightGO.GetComponent<HDAdditionalLightData>();
             Assert.NotNull(unityHDData, "Can't find generated pooled HDAdditionalLightData component");
-            Assert.AreEqual(hdData.lightTypeExtent          , unityHDData.lightTypeExtent       );      
-            Assert.AreEqual(hdData.intensity                , unityHDData.intensity             );            
-            Assert.AreEqual(hdData.lightDimmer              , unityHDData.lightDimmer           );         
-            Assert.AreEqual(hdData.fadeDistance             , unityHDData.fadeDistance          );         
-            Assert.AreEqual(hdData.affectDiffuse            , unityHDData.affectDiffuse         );        
-            Assert.AreEqual(hdData.affectSpecular           , unityHDData.affectSpecular        );       
-            Assert.AreEqual(hdData.shapeWidth               , unityHDData.shapeWidth            );           
-            Assert.AreEqual(hdData.shapeHeight              , unityHDData.shapeHeight           );          
-            Assert.AreEqual(hdData.aspectRatio              , unityHDData.aspectRatio           );          
-            Assert.AreEqual(hdData.shapeRadius              , unityHDData.shapeRadius           );          
-            Assert.AreEqual(hdData.maxSmoothness            , unityHDData.maxSmoothness         );
-            Assert.AreEqual(hdData.applyRangeAttenuation    , unityHDData.applyRangeAttenuation );
-            Assert.AreEqual(hdData.spotLightShape           , unityHDData.spotLightShape        );
-            Assert.AreEqual(hdData.enableSpotReflector      , unityHDData.enableSpotReflector   );  
-            Assert.AreEqual(hdData.innerSpotPercent         , unityHDData.m_InnerSpotPercent    );
+            Assert.AreEqual(hdData.lightTypeExtent, unityHDData.lightTypeExtent);
+            Assert.AreEqual(hdData.intensity, unityHDData.intensity);
+            Assert.AreEqual(hdData.lightDimmer, unityHDData.lightDimmer);
+            Assert.AreEqual(hdData.fadeDistance, unityHDData.fadeDistance);
+            Assert.AreEqual(hdData.affectDiffuse, unityHDData.affectDiffuse);
+            Assert.AreEqual(hdData.affectSpecular, unityHDData.affectSpecular);
+            Assert.AreEqual(hdData.shapeWidth, unityHDData.shapeWidth);
+            Assert.AreEqual(hdData.shapeHeight, unityHDData.shapeHeight);
+            Assert.AreEqual(hdData.aspectRatio, unityHDData.aspectRatio);
+            Assert.AreEqual(hdData.shapeRadius, unityHDData.shapeRadius);
+            Assert.AreEqual(hdData.maxSmoothness, unityHDData.maxSmoothness);
+            Assert.AreEqual(hdData.applyRangeAttenuation, unityHDData.applyRangeAttenuation);
+            Assert.AreEqual(hdData.spotLightShape, unityHDData.spotLightShape);
+            Assert.AreEqual(hdData.enableSpotReflector, unityHDData.enableSpotReflector);
+            Assert.AreEqual(hdData.innerSpotPercent, unityHDData.m_InnerSpotPercent);
 
             var unityHDShadow = lightGO.GetComponent<AdditionalShadowData>();
             Assert.NotNull(unityHDData, "Can't find generated pooled AdditionalShadowData component");
-            Assert.AreEqual(hdShadow.shadowResolution       , unityHDShadow.shadowResolution      );
-            Assert.AreEqual(hdShadow.shadowDimmer           , unityHDShadow.shadowDimmer          );
-            Assert.AreEqual(hdShadow.volumetricShadowDimmer , unityHDShadow.volumetricShadowDimmer);
-            Assert.AreEqual(hdShadow.shadowFadeDistance     , unityHDShadow.shadowFadeDistance    );
-            Assert.AreEqual(hdShadow.contactShadows         , unityHDShadow.contactShadows        );
-            Assert.AreEqual(hdShadow.viewBiasMin            , unityHDShadow.viewBiasMin           );
-            Assert.AreEqual(hdShadow.viewBiasMax            , unityHDShadow.viewBiasMax           );
-            Assert.AreEqual(hdShadow.viewBiasScale          , unityHDShadow.viewBiasScale         );
-            Assert.AreEqual(hdShadow.normalBiasMin          , unityHDShadow.normalBiasMin         );
-            Assert.AreEqual(hdShadow.normalBiasMax          , unityHDShadow.normalBiasMax         );
-            Assert.AreEqual(hdShadow.normalBiasScale        , unityHDShadow.normalBiasScale       );
-            Assert.AreEqual(hdShadow.sampleBiasScale        , unityHDShadow.sampleBiasScale       );
-            Assert.AreEqual(hdShadow.sampleBiasScale        , unityHDShadow.sampleBiasScale       );
-            Assert.AreEqual(hdShadow.edgeLeakFixup          , unityHDShadow.edgeLeakFixup         );
-            Assert.AreEqual(hdShadow.edgeToleranceNormal    , unityHDShadow.edgeToleranceNormal   );
-            Assert.AreEqual(hdShadow.edgeTolerance          , unityHDShadow.edgeTolerance         );
-#endif      
-            
+            Assert.AreEqual(hdData.shadowResolution, unityHDShadow.shadowResolution);
+            Assert.AreEqual(hdData.shadowDimmer, unityHDShadow.shadowDimmer);
+            Assert.AreEqual(hdData.volumetricShadowDimmer, unityHDShadow.volumetricShadowDimmer);
+            Assert.AreEqual(hdData.shadowFadeDistance, unityHDShadow.shadowFadeDistance);
+            Assert.AreEqual(hdData.contactShadows, unityHDShadow.contactShadows);
+            Assert.AreEqual(hdData.viewBiasMin, unityHDShadow.viewBiasMin);
+            Assert.AreEqual(hdData.viewBiasMax, unityHDShadow.viewBiasMax);
+            Assert.AreEqual(hdData.viewBiasScale, unityHDShadow.viewBiasScale);
+            Assert.AreEqual(hdData.normalBiasMin, unityHDShadow.normalBiasMin);
+            Assert.AreEqual(hdData.normalBiasMax, unityHDShadow.normalBiasMax);
+            Assert.AreEqual(hdData.normalBiasScale, unityHDShadow.normalBiasScale);
+            Assert.AreEqual(hdData.sampleBiasScale, unityHDShadow.sampleBiasScale);
+            Assert.AreEqual(hdData.sampleBiasScale, unityHDShadow.sampleBiasScale);
+            Assert.AreEqual(hdData.edgeLeakFixup, unityHDShadow.edgeLeakFixup);
+            Assert.AreEqual(hdData.edgeToleranceNormal, unityHDShadow.edgeToleranceNormal);
+            Assert.AreEqual(hdData.edgeTolerance, unityHDShadow.edgeTolerance);
+#elif HDRP_7_EXISTS
+            var unityHDData = lightGO.GetComponent<HDAdditionalLightData>();
+            Assert.NotNull(unityHDData, "Can't find generated pooled HDAdditionalLightData component");
+            Assert.AreEqual(hdData.lightTypeExtent, unityHDData.lightTypeExtent);
+            Assert.AreEqual(hdData.intensity, unityHDData.intensity);
+            Assert.AreEqual(hdData.lightDimmer, unityHDData.lightDimmer);
+            Assert.AreEqual(hdData.fadeDistance, unityHDData.fadeDistance);
+            Assert.AreEqual(hdData.affectDiffuse, unityHDData.affectDiffuse);
+            Assert.AreEqual(hdData.affectSpecular, unityHDData.affectSpecular);
+            Assert.AreEqual(hdData.shapeWidth, unityHDData.shapeWidth);
+            Assert.AreEqual(hdData.shapeHeight, unityHDData.shapeHeight);
+            Assert.AreEqual(hdData.aspectRatio, unityHDData.aspectRatio);
+            Assert.AreEqual(hdData.shapeRadius, unityHDData.shapeRadius);
+            Assert.AreEqual(hdData.maxSmoothness, unityHDData.maxSmoothness);
+            Assert.AreEqual(hdData.applyRangeAttenuation, unityHDData.applyRangeAttenuation);
+            Assert.AreEqual(hdData.spotLightShape, unityHDData.spotLightShape);
+            Assert.AreEqual(hdData.enableSpotReflector, unityHDData.enableSpotReflector);
+            Assert.AreEqual(hdData.innerSpotPercent, unityHDData.innerSpotPercent);
+            Assert.AreEqual(hdData.customResolution, unityHDData.customResolution);
+            Assert.AreEqual(hdData.shadowDimmer, unityHDData.shadowDimmer);
+            Assert.AreEqual(hdData.volumetricShadowDimmer, unityHDData.volumetricShadowDimmer);
+            Assert.AreEqual(hdData.shadowFadeDistance, unityHDData.shadowFadeDistance);
+            Assert.AreEqual(hdData.contactShadows, unityHDData.contactShadows);
+            Assert.AreEqual(hdData.shadowTint, unityHDData.shadowTint);
+            Assert.AreEqual(hdData.normalBias, unityHDData.normalBias);
+            Assert.AreEqual(hdData.constantBias, unityHDData.constantBias);
+            Assert.AreEqual(hdData.shadowUpdateMode, unityHDData.shadowUpdateMode);
+#endif
+
             // Test light delete
             world.EntityManager.DestroyEntity(entity);
             lightSystem.Update();

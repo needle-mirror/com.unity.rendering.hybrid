@@ -1,5 +1,16 @@
 # Change log
 
+## [0.1.1-preview] - 2019-08-06 
+
+### Fixes
+
+* Adding a disabled tag component, now correctly disables the light.
+
+### Changes
+
+* Updated dependencies for this package.
+
+
 ## [0.1.0-preview] - 2019-07-30
 
 ### New Features
@@ -21,19 +32,22 @@
 
 ### Changes
 
-### Fixes
+* Changing `entities` dependency to latest version (`0.1.0-preview`).
+
 
 ## [0.0.1-preview.13] - 2019-05-24
 
 ### Changes
 
-* Changing `entities` dependency to latest version (`0.0.12-preview.33`) 
+* Changing `entities` dependency to latest version (`0.0.12-preview.33`). 
+
 
 ## [0.0.1-preview.12] - 2019-05-16
 
 ### Fixes
 
 * Adding/fixing `Equals` and `GetHashCode` for proxy components. 
+
 
 ## [0.0.1-preview.11] - 2019-05-01
 

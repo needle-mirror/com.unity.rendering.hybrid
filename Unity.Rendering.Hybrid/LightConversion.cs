@@ -1,7 +1,10 @@
 using Unity.Entities;
-#if HDRP_EXISTS
+ 
+#if HDRP_6_EXISTS
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Experimental.Rendering.HDPipeline;
+#elif HDRP_7_EXISTS
+using UnityEngine.Rendering.HighDefinition;
 #endif
 
 namespace Unity.Rendering
@@ -39,8 +42,45 @@ namespace Unity.Rendering
                     DstEntityManager.AddSharedComponentData(entity, cookie);
                 }
 
-#if HDRP_EXISTS
                 // Optional dependency to com.unity.render-pipelines.high-definition
+#if HDRP_6_EXISTS
+                HDLightData hdData;
+
+                var unityHdData = unityLight.GetComponent<HDAdditionalLightData>();
+                hdData.lightTypeExtent = unityHdData.lightTypeExtent;
+                hdData.intensity = unityHdData.intensity;
+                hdData.lightDimmer = unityHdData.lightDimmer;
+                hdData.fadeDistance = unityHdData.fadeDistance;
+                hdData.affectDiffuse = unityHdData.affectDiffuse;
+                hdData.affectSpecular = unityHdData.affectSpecular;
+                hdData.shapeWidth = unityHdData.shapeWidth;
+                hdData.shapeHeight = unityHdData.shapeHeight;
+                hdData.aspectRatio = unityHdData.aspectRatio;
+                hdData.shapeRadius = unityHdData.shapeRadius;
+                hdData.maxSmoothness = unityHdData.maxSmoothness;
+                hdData.applyRangeAttenuation = unityHdData.applyRangeAttenuation;
+                hdData.spotLightShape = unityHdData.spotLightShape;
+                hdData.enableSpotReflector = unityHdData.enableSpotReflector;
+                hdData.innerSpotPercent = unityHdData.m_InnerSpotPercent;
+
+                var unityShadowData = unityLight.GetComponent<AdditionalShadowData>();
+                hdData.shadowResolution = unityShadowData.shadowResolution;
+                hdData.shadowDimmer = unityShadowData.shadowDimmer;
+                hdData.volumetricShadowDimmer = unityShadowData.volumetricShadowDimmer;
+                hdData.shadowFadeDistance = unityShadowData.shadowFadeDistance;
+                hdData.contactShadows = unityShadowData.contactShadows;
+                hdData.viewBiasMin = unityShadowData.viewBiasMin;
+                hdData.viewBiasMax = unityShadowData.viewBiasMax;
+                hdData.viewBiasScale = unityShadowData.viewBiasScale;
+                hdData.normalBiasMin = unityShadowData.normalBiasMin;
+                hdData.normalBiasMax = unityShadowData.normalBiasMax;
+                hdData.normalBiasScale = unityShadowData.normalBiasScale;
+                hdData.sampleBiasScale = unityShadowData.sampleBiasScale;
+                hdData.edgeLeakFixup = unityShadowData.edgeLeakFixup;
+                hdData.edgeToleranceNormal = unityShadowData.edgeToleranceNormal;
+                hdData.edgeTolerance = unityShadowData.edgeTolerance;
+                DstEntityManager.AddComponentData(entity, hdData);
+#elif HDRP_7_EXISTS
                 var unityHdData = unityLight.GetComponent<HDAdditionalLightData>();
                 HDLightData hdData;
                 hdData.lightTypeExtent          = unityHdData.lightTypeExtent;
@@ -57,27 +97,17 @@ namespace Unity.Rendering
                 hdData.applyRangeAttenuation    = unityHdData.applyRangeAttenuation;
                 hdData.spotLightShape           = unityHdData.spotLightShape;
                 hdData.enableSpotReflector      = unityHdData.enableSpotReflector;
-                hdData.innerSpotPercent         = unityHdData.m_InnerSpotPercent;
+                hdData.innerSpotPercent         = unityHdData.innerSpotPercent;
+                hdData.customResolution         = unityHdData.customResolution;
+                hdData.shadowDimmer             = unityHdData.shadowDimmer;
+                hdData.volumetricShadowDimmer   = unityHdData.volumetricShadowDimmer;
+                hdData.shadowFadeDistance       = unityHdData.shadowFadeDistance;
+                hdData.contactShadows           = unityHdData.contactShadows;
+                hdData.shadowTint               = unityHdData.shadowTint;
+                hdData.normalBias               = unityHdData.normalBias;
+                hdData.constantBias             = unityHdData.constantBias;
+                hdData.shadowUpdateMode         = unityHdData.shadowUpdateMode;
                 DstEntityManager.AddComponentData(entity, hdData);
-
-                var unityShadowData = unityLight.GetComponent<AdditionalShadowData>();
-                HDShadowData hdShadow;
-                hdShadow.shadowResolution         = unityShadowData.shadowResolution;
-                hdShadow.shadowDimmer             = unityShadowData.shadowDimmer;
-                hdShadow.volumetricShadowDimmer   = unityShadowData.volumetricShadowDimmer;
-                hdShadow.shadowFadeDistance       = unityShadowData.shadowFadeDistance;
-                hdShadow.contactShadows           = unityShadowData.contactShadows;
-                hdShadow.viewBiasMin              = unityShadowData.viewBiasMin;
-                hdShadow.viewBiasMax              = unityShadowData.viewBiasMax;
-                hdShadow.viewBiasScale            = unityShadowData.viewBiasScale;
-                hdShadow.normalBiasMin            = unityShadowData.normalBiasMin;
-                hdShadow.normalBiasMax            = unityShadowData.normalBiasMax;
-                hdShadow.normalBiasScale          = unityShadowData.normalBiasScale;
-                hdShadow.sampleBiasScale          = unityShadowData.sampleBiasScale;
-                hdShadow.edgeLeakFixup            = unityShadowData.edgeLeakFixup;
-                hdShadow.edgeToleranceNormal      = unityShadowData.edgeToleranceNormal;
-                hdShadow.edgeTolerance            = unityShadowData.edgeTolerance;
-                DstEntityManager.AddComponentData(entity, hdShadow);
 #endif
             });
         }

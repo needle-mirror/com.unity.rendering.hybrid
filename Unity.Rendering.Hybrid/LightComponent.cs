@@ -2,8 +2,11 @@ using System;
 using Unity.Entities;
 using Unity.Mathematics;
 using UnityEngine;
-#if HDRP_EXISTS
+ 
+#if HDRP_6_EXISTS
 using UnityEngine.Experimental.Rendering.HDPipeline;
+#elif HDRP_7_EXISTS
+using UnityEngine.Rendering.HighDefinition;
 #endif
 
 namespace Unity.Rendering
@@ -47,8 +50,8 @@ namespace Unity.Rendering
         }
     }
 
-#if HDRP_EXISTS
     // Optional dependency to com.unity.render-pipelines.high-definition
+#if HDRP_6_EXISTS
     public struct HDLightData : IComponentData
     {
         public LightTypeExtent lightTypeExtent;
@@ -70,25 +73,51 @@ namespace Unity.Rendering
         public SpotLightShape spotLightShape;
         public bool enableSpotReflector;
         public float innerSpotPercent;
-    }
 
-    public struct HDShadowData : IComponentData
-    {
+        // HDShadowData
         public int shadowResolution;
         public float shadowDimmer;
         public float volumetricShadowDimmer;
         public float shadowFadeDistance;
         public bool contactShadows;
-        public float viewBiasMin;
-        public float viewBiasMax;
-        public float viewBiasScale;
-        public float normalBiasMin;
-        public float normalBiasMax;
-        public float normalBiasScale;
-        public bool sampleBiasScale;
-        public bool edgeLeakFixup;
-        public bool edgeToleranceNormal;
-        public float edgeTolerance;
+        public Color shadowTint;
+        public float normalBias;
+        public float constantBias;
+        public ShadowUpdateMode shadowUpdateMode;
+    }
+#elif HDRP_7_EXISTS
+    public struct HDLightData : IComponentData
+    {
+        public LightTypeExtent lightTypeExtent;
+
+        public float intensity;
+        public float lightDimmer;
+        public float fadeDistance;
+        public bool affectDiffuse;
+        public bool affectSpecular;
+
+        public float shapeWidth;
+        public float shapeHeight;
+        public float aspectRatio;
+        public float shapeRadius;
+        public float maxSmoothness;
+        public bool applyRangeAttenuation;
+
+        // Spot specific
+        public SpotLightShape spotLightShape;
+        public bool enableSpotReflector;
+        public float innerSpotPercent;
+
+        // HDShadowData
+        public int customResolution;
+        public float shadowDimmer;
+        public float volumetricShadowDimmer;
+        public float shadowFadeDistance;
+        public bool contactShadows;
+        public Color shadowTint;
+        public float normalBias;
+        public float constantBias;
+        public ShadowUpdateMode shadowUpdateMode;
     }
 #endif
 }

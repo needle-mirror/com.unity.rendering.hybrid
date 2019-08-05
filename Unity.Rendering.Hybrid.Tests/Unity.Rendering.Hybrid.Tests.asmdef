@@ -29,8 +29,13 @@
     "versionDefines": [
         {
             "name": "com.unity.render-pipelines.high-definition",
-            "expression": "0.0.0",
-            "define": "HDRP_EXISTS"
+            "expression": "[6.0.0,7.0.0)",
+            "define": "HDRP_6_EXISTS"
+        },
+        {
+            "name": "com.unity.render-pipelines.high-definition",
+            "expression": "7.0.0",
+            "define": "HDRP_7_EXISTS"
         }
     ]
 }
