@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
@@ -375,19 +376,21 @@ namespace Unity.Rendering
     {
         public const int kFlagHasLodData = 1 << 0;
         public const int kFlagInstanceCulling = 1 << 1;
-        public short ChunkInstanceCount;                       //  2
-        public short BatchOffset;                              //  2
-        public ushort MovementGraceFixed16;                    //  2     6
-        public byte Flags;                                     //  1
-        public byte ForceLowLODPrevious;                       //  1     8
-        public ChunkWorldRenderBounds ChunkBounds;             // 24    32
-        public ChunkInstanceLodEnabled InstanceLodEnableds;    // 16    48
-        public ArchetypeChunk Chunk;                           //  8    64
+                                                               // size  // start - end offset
+        public short ChunkInstanceCount;                       //  2     0 - 2
+        public short BatchOffset;                              //  2     2 - 4
+        public ushort MovementGraceFixed16;                    //  2     4 - 6
+        public byte Flags;                                     //  1     6 - 7
+        public byte ForceLowLODPrevious;                       //  1     7 - 8
+        public ChunkWorldRenderBounds ChunkBounds;             // 24     8 - 32
+        public ChunkInstanceLodEnabled InstanceLodEnableds;    // 16     32 - 48
+        public ArchetypeChunk Chunk;                           //  8     48 - 64
     }
 
     public unsafe class InstancedRenderMeshBatchGroup
     {
         const int kMaxBatchCount = 64 * 1024;
+        const int kMaxArchetypeProperties = 256;
 
         EntityManager m_EntityManager;
         ComponentSystemBase m_ComponentSystem;
@@ -410,6 +413,9 @@ namespace Unity.Rendering
         // Tracks the highest index (+1) in use across InstanceCounts/Tags/LodSkip.
         int m_InternalBatchRange;
         int m_ExternalBatchCount;
+
+        // Per-batch material properties
+        List<MaterialPropertyBlock> m_MaterialPropertyBlocks;
 
         // This is a hack to allocate local batch indices in response to external batches coming and going
         int m_LocalIdCapacity;
@@ -449,6 +455,25 @@ namespace Unity.Rendering
 
         ProfilerMarker m_RemoveBatchMarker;
 
+        struct MaterialPropertyType
+        {
+            public int nameId;
+            public int nameIdArray;
+            public int typeIndex;
+            public MaterialPropertyFormat format;
+            public int numFormatComponents;
+        };
+
+        struct MaterialPropertyPointer
+        {
+            public float* ptr;
+            public ArchetypeChunkComponentTypeDynamic type;
+            public int numFormatComponents;
+        };
+
+        List<MaterialPropertyType> m_MaterialPropertyTypes;
+        MaterialPropertyPointer[] m_MaterialPropertyPointers;
+
         public InstancedRenderMeshBatchGroup(EntityManager entityManager, ComponentSystemBase componentSystem, EntityQuery cullingJobDependencyGroup)
         {
             m_BatchRendererGroup = new BatchRendererGroup(this.OnPerformCulling);
@@ -470,6 +495,40 @@ namespace Unity.Rendering
 #if UNITY_EDITOR
             m_CullingStats = (CullingStats*)UnsafeUtility.Malloc(JobsUtility.MaxJobThreadCount * sizeof(CullingStats), 64, Allocator.Persistent);
 #endif
+            m_MaterialPropertyBlocks = new List<MaterialPropertyBlock>();
+
+            // Collect all components with [MaterialProperty] attribute
+            m_MaterialPropertyTypes = new List<MaterialPropertyType>();
+            foreach (var typeInfo in TypeManager.AllTypes)
+            {
+                var type = typeInfo.Type;
+                if (typeof(IComponentData).IsAssignableFrom(type))
+                { 
+                    var attributes = type.GetCustomAttributes(typeof(MaterialPropertyAttribute), false);
+                    if (attributes.Length > 0)
+                    { 
+                        var format = ((MaterialPropertyAttribute)attributes[0]).Format;
+                        int numFormatComponents = 1;
+                        switch (format)
+                        {
+                            case MaterialPropertyFormat.Float: numFormatComponents = 1; break;
+                            case MaterialPropertyFormat.Float4: numFormatComponents = 4; break;
+                            case MaterialPropertyFormat.Float4x4: numFormatComponents = 16; break;
+                        }
+
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
+                        if (UnsafeUtility.SizeOf(type) != numFormatComponents * sizeof(float))
+                        {
+                            throw new InvalidOperationException($"Material property component {type} (size = {UnsafeUtility.SizeOf(type)}) cannot be reinterpreted as {numFormatComponents} floats (size = {numFormatComponents * sizeof(float)}). Sizes must match.");
+                        }
+#endif
+
+                        m_MaterialPropertyTypes.Add(new MaterialPropertyType { typeIndex = TypeManager.GetTypeIndex(type), nameId = Shader.PropertyToID(((MaterialPropertyAttribute)attributes[0]).Name), nameIdArray = Shader.PropertyToID(((MaterialPropertyAttribute)attributes[0]).Name + "_Array"), format = format, numFormatComponents = numFormatComponents });
+                    }
+                }
+            }
+
+            m_MaterialPropertyPointers = new MaterialPropertyPointer[m_MaterialPropertyTypes.Count];
 
             ResetLocalIdPool();
         }
@@ -500,6 +559,7 @@ namespace Unity.Rendering
             m_ResetLod = true;
             m_InternalBatchRange = 0;
             m_ExternalBatchCount = 0;
+            m_MaterialPropertyBlocks.Clear();
         }
 
         public void Clear()
@@ -514,6 +574,7 @@ namespace Unity.Rendering
             m_ExternalBatchCount = 0;
 
             m_BatchToChunkMap.Clear();
+            m_MaterialPropertyBlocks.Clear();
 
             ResetLocalIdPool();
         }
@@ -664,6 +725,13 @@ namespace Unity.Rendering
 
             Profiler.BeginSample("AddBatch");
             int externalBatchIndex = m_BatchRendererGroup.AddBatch(mesh, subMeshIndex, material, layer, castShadows, receiveShadows, flippedWinding, bigBounds, batchInstanceCount, null, data.PickableObject, data.SceneCullingMask);
+
+            if (externalBatchIndex > m_MaterialPropertyBlocks.Count - 1)
+                m_MaterialPropertyBlocks.Add(new MaterialPropertyBlock());
+            
+            var propertyBlock = m_MaterialPropertyBlocks[externalBatchIndex];
+            m_BatchRendererGroup.SetInstancingData(externalBatchIndex, batchInstanceCount, propertyBlock);
+
             var matrices = (float4x4*) m_BatchRendererGroup.GetBatchMatrices(externalBatchIndex).GetUnsafePtr();
             Profiler.EndSample();
 
@@ -679,7 +747,73 @@ namespace Unity.Rendering
             var instanceLodRequirements = m_ComponentSystem.GetArchetypeChunkComponentType<LodRequirement>(true);
             var perInstanceCullingTag = m_ComponentSystem.GetArchetypeChunkComponentType<PerInstanceCullingTag>(true);
 
+            var shader = material.shader;
+            var numProperties = shader.GetPropertyCount();
+            int numShaderMaterialProperties = 0;
+            for (int i = 0; i < numProperties; ++i)
+            {
+                var flags = shader.GetPropertyFlags(i);
+                if (((uint)flags & (uint)ShaderPropertyFlags.HideInInspector) == 0)
+                {
+                    //var nameId = Shader.PropertyToID(shader.GetPropertyName(i));      // This causes GCAlloc
+                    var nameId = shader.GetPropertyNameId(i);                           // New C++ API (landed 3 hours later)
+
+                    int materialPropertyIndex = 0;
+                    for (; materialPropertyIndex < m_MaterialPropertyTypes.Count; ++materialPropertyIndex)
+                    {
+                        if (nameId == m_MaterialPropertyTypes[materialPropertyIndex].nameId) break;
+                    }
+
+                    // Found?
+                    if (materialPropertyIndex < m_MaterialPropertyTypes.Count)
+                    {
+                        float* nativePtr = null;
+
+                        switch (m_MaterialPropertyTypes[materialPropertyIndex].format)
+                        {
+                            case MaterialPropertyFormat.Float:
+                                {
+                                    var arr1 = m_BatchRendererGroup.GetBatchScalarArray(externalBatchIndex, m_MaterialPropertyTypes[materialPropertyIndex].nameIdArray);
+                                    nativePtr = (float*)arr1.GetUnsafePtr();
+                                    var defaultValue = material.GetFloat(m_MaterialPropertyTypes[materialPropertyIndex].nameId);
+                                    UnsafeUtility.MemCpyReplicate(nativePtr, &defaultValue, UnsafeUtility.SizeOf<float>(), batchInstanceCount); // TODO: Reuse batches to avoid default initialization every frame.
+                                }
+                                break;
+
+                            case MaterialPropertyFormat.Float4:
+                                {
+                                    var arr4 = m_BatchRendererGroup.GetBatchVectorArray(externalBatchIndex, m_MaterialPropertyTypes[materialPropertyIndex].nameIdArray);
+                                    nativePtr = (float*)arr4.GetUnsafePtr();
+                                    var defaultValue = material.GetVector(m_MaterialPropertyTypes[materialPropertyIndex].nameId);
+                                    UnsafeUtility.MemCpyReplicate(nativePtr, &defaultValue, UnsafeUtility.SizeOf<float4>(), batchInstanceCount); // TODO: Reuse batches to avoid default initialization every frame.
+                                }
+                                break;
+
+                            case MaterialPropertyFormat.Float4x4:
+                                {
+                                    var arr4x4 = m_BatchRendererGroup.GetBatchMatrixArray(externalBatchIndex, m_MaterialPropertyTypes[materialPropertyIndex].nameIdArray);
+                                    nativePtr = (float*)arr4x4.GetUnsafePtr();
+                                    var defaultValue = material.GetMatrix(m_MaterialPropertyTypes[materialPropertyIndex].nameId);
+                                    UnsafeUtility.MemCpyReplicate(nativePtr, &defaultValue, UnsafeUtility.SizeOf<float4x4>(), batchInstanceCount); // TODO: Reuse batches to avoid default initialization every frame.
+                                }
+                                break;
+                        }
+
+                        m_MaterialPropertyPointers[numShaderMaterialProperties++] = new MaterialPropertyPointer 
+                        { 
+                            ptr = nativePtr,
+                            type = m_ComponentSystem.GetArchetypeChunkComponentTypeDynamic(ComponentType.ReadOnly(m_MaterialPropertyTypes[materialPropertyIndex].typeIndex)),
+                            numFormatComponents = m_MaterialPropertyTypes[materialPropertyIndex].numFormatComponents
+                        };
+                    }
+                }
+
+            }
+
             int runningOffset = 0;
+            var previousArchetype = new EntityArchetype();
+            int numActiveArchetypeMaterialProperties = 0;
+            var archetypeActiveMaterialProperties = new NativeArray<int>(kMaxArchetypeProperties, Allocator.Temp, NativeArrayOptions.UninitializedMemory); 
 
             for (int i = 0; i < chunkCount; ++i)
             {
@@ -702,8 +836,6 @@ namespace Unity.Rendering
                     InstanceLodEnableds = default
                 });
 
-                runningOffset += chunk.Count;
-
                 var matrixSizeOf = UnsafeUtility.SizeOf<float4x4>();
                 var localToWorld = chunk.GetNativeArray(localToWorldType);
                 float4x4* srcMatrices = (float4x4*) localToWorld.GetUnsafeReadOnlyPtr();
@@ -711,7 +843,41 @@ namespace Unity.Rendering
                 UnsafeUtility.MemCpy(matrices, srcMatrices, matrixSizeOf * chunk.Count);
 
                 matrices += chunk.Count;
+
+                // Go though all [MaterialProperty] component types in the chunk, and collect them to an array. Use same components until archetype changes.
+                if (previousArchetype != chunk.Archetype)
+                {
+                    previousArchetype = chunk.Archetype;
+                    numActiveArchetypeMaterialProperties = 0;
+
+                    for (int j = 0; j < numShaderMaterialProperties; j++)
+                    {
+                        if (chunk.Has(m_MaterialPropertyPointers[j].type))
+                        {
+                            archetypeActiveMaterialProperties[numActiveArchetypeMaterialProperties++] = j;
+                        }
+                    }
+                }
+               
+                // Memcpy all material property instance data in [MaterialProperty] types to C++ side arrays
+                for (int j = 0; j < numActiveArchetypeMaterialProperties; j++)
+                {
+                    var componentIndex = archetypeActiveMaterialProperties[j];
+                    var componentSize = UnsafeUtility.SizeOf<float>() * m_MaterialPropertyPointers[componentIndex].numFormatComponents;
+                    var chunkData = chunk.GetDynamicComponentDataArrayReinterpret<float>(m_MaterialPropertyPointers[componentIndex].type, componentSize);
+                    Debug.Assert(chunkData.Length > 0);
+
+                    float* srcData = (float*)chunkData.GetUnsafeReadOnlyPtr();
+                    float* dstData = m_MaterialPropertyPointers[componentIndex].ptr + runningOffset * m_MaterialPropertyPointers[componentIndex].numFormatComponents;
+                    int copySize = chunk.Count * componentSize;
+
+                    UnsafeUtility.MemCpy(dstData, srcData, copySize);
+                }
+
+                runningOffset += chunk.Count;
             }
+
+            archetypeActiveMaterialProperties.Dispose();
 
             m_Tags[internalBatchIndex] = tag;
             m_ForceLowLOD[internalBatchIndex] = (byte) ((tag.SectionIndex == 0 && tag.HasStreamedLOD != 0) ? 1 : 0);
@@ -721,7 +887,7 @@ namespace Unity.Rendering
 
             SanityCheck();
         }
-
+        
         private void SanityCheck()
         {
 #if false
@@ -885,6 +1051,5 @@ namespace Unity.Rendering
             m_CullingJobDependency = JobHandle.CombineDependencies(job, m_CullingJobDependency);
             m_CullingJobDependencyGroup.AddDependency(job);
         }
-
     }
 }

@@ -2,6 +2,7 @@
 using Unity.Rendering;
 using UnityEngine;
 
+[ConverterVersion("joe", 1)]
 [UpdateInGroup(typeof(GameObjectAfterConversionGroup))]
 class HLODGroupSectionSplitConversion : GameObjectConversionSystem
 {

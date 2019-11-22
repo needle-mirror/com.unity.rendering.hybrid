@@ -7,6 +7,7 @@ using UnityEngine;
 namespace Unity.Rendering
 {
     [UpdateAfter(typeof(LODGroupConversion))]
+    [ConverterVersion("joe", 1)]
     class HLODGroupConversion : GameObjectConversionSystem
     {    
         protected override void OnUpdate()

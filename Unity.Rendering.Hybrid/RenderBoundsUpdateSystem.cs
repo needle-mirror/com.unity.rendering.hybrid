@@ -12,6 +12,7 @@ namespace Unity.Rendering
     /// <summary>
     /// During conversion flow we want to generate a scene bounding volume for each section
     /// </summary>
+    [ConverterVersion("joe", 1)]
     [UpdateAfter(typeof(RenderBoundsUpdateSystem))]
     [WorldSystemFilter(WorldSystemFilterFlags.EntitySceneOptimizations)]
     class UpdateSceneBoundingVolumeFromRendererBounds : ComponentSystem
@@ -50,7 +51,7 @@ namespace Unity.Rendering
                 if (section.Equals(default(SceneSection)))
                     continue;
 
-                query.SetFilter(section);
+                query.SetSharedComponentFilter(section);
 
                 var entity = EntityManager.CreateEntity(typeof(SceneBoundingVolume));
                 EntityManager.AddSharedComponentData(entity, section);
@@ -67,6 +68,7 @@ namespace Unity.Rendering
     }
     
     
+    [ConverterVersion("joe", 1)]
     [UpdateInGroup(typeof(PresentationSystemGroup))]
     [ExecuteAlways]
     [WorldSystemFilter(WorldSystemFilterFlags.Default | WorldSystemFilterFlags.EntitySceneOptimizations)]
@@ -115,6 +117,7 @@ namespace Unity.Rendering
     /// <summary>
     /// Updates WorldRenderBounds for anything that has LocalToWorld and RenderBounds (and ensures WorldRenderBounds exists)
     /// </summary>
+    [ConverterVersion("joe", 1)]
     [UpdateInGroup(typeof(PresentationSystemGroup))]
     [UpdateAfter(typeof(CreateMissingRenderBoundsFromMeshRenderer))]
     [WorldSystemFilter(WorldSystemFilterFlags.Default | WorldSystemFilterFlags.EntitySceneOptimizations)]

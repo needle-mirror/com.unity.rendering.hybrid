@@ -248,7 +248,7 @@ namespace Unity.Rendering
                 if (alreadyTrackingSubscene)
                     continue;
 
-                m_FrozenGroup.SetFilter(subsceneTag);
+                m_FrozenGroup.SetSharedComponentFilter(subsceneTag);
 
                 var filteredChunks = m_FrozenGroup.CreateArchetypeChunkArray(Allocator.TempJob);
 

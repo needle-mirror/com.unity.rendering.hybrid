@@ -1,5 +1,4 @@
 ﻿using System.Collections.Generic;
-using Unity.Rendering;
 using Unity.Transforms;
 using Unity.Entities;
 using Unity.Mathematics;
@@ -8,85 +7,92 @@ using UnityEngine;
 
 namespace Unity.Rendering
 {
+    [ConverterVersion("joe", 1)]
     class MeshRendererConversion : GameObjectConversionSystem
     {
         const bool AttachToPrimaryEntityForSingleMaterial = true;
 
         protected override void OnUpdate()
         {
-            var sceneBounds = MinMaxAABB.Empty;
-
             var materials = new List<Material>(10);
             Entities.ForEach((MeshRenderer meshRenderer, MeshFilter meshFilter) =>
             {
                 var entity = GetPrimaryEntity(meshRenderer);
-
                 var mesh = meshFilter.sharedMesh;
                 meshRenderer.GetSharedMaterials(materials);
-                var materialCount = materials.Count;
 
-                // Don't add RenderMesh (and other required components) unless both mesh and material assigned.
-                if ((mesh != null) && (materialCount > 0))
+                Convert(entity, DstEntityManager, this, meshRenderer, mesh, materials);
+            });
+        }
+
+        public static void Convert(
+                Entity entity,
+                EntityManager dstEntityManager,
+                GameObjectConversionSystem conversionSystem, 
+                Renderer meshRenderer, 
+                Mesh mesh, 
+                List<Material> materials)
+        {
+            var materialCount = materials.Count;
+
+            // Don't add RenderMesh (and other required components) unless both mesh and material assigned.
+            if ((mesh != null) && (materialCount > 0))
+            {
+                var renderMesh = new RenderMesh
                 {
-                    var dst = new RenderMesh();
-                    dst.mesh = mesh;
-                    dst.castShadows = meshRenderer.shadowCastingMode;
-                    dst.receiveShadows = meshRenderer.receiveShadows;
-                    dst.layer = meshRenderer.gameObject.layer;
-                    
-                    //@TODO: Transform system should handle RenderMeshFlippedWindingTag automatically. This should not be the responsibility of the conversion system.
-                    float4x4 localToWorld = meshRenderer.transform.localToWorldMatrix;
-                    var flipWinding = math.determinant(localToWorld) < 0.0;
+                    mesh = mesh,
+                    castShadows = meshRenderer.shadowCastingMode,
+                    receiveShadows = meshRenderer.receiveShadows,
+                    layer = meshRenderer.gameObject.layer
+                };
 
-                    if (materialCount == 1 && AttachToPrimaryEntityForSingleMaterial)
+                //@TODO: Transform system should handle RenderMeshFlippedWindingTag automatically. This should not be the responsibility of the conversion system.
+                float4x4 localToWorld = meshRenderer.transform.localToWorldMatrix;
+                var flipWinding = math.determinant(localToWorld) < 0.0;
+
+                if (materialCount == 1 && AttachToPrimaryEntityForSingleMaterial)
+                {
+                    renderMesh.material = materials[0];
+                    renderMesh.subMesh = 0;
+
+                    dstEntityManager.AddSharedComponentData(entity, renderMesh);
+
+                    dstEntityManager.AddComponentData(entity, new PerInstanceCullingTag());
+                    dstEntityManager.AddComponentData(entity, new RenderBounds { Value = mesh.bounds.ToAABB() });
+
+                    if (flipWinding)
+                        dstEntityManager.AddComponent(entity, ComponentType.ReadWrite<RenderMeshFlippedWindingTag>());
+
+                    conversionSystem.ConfigureEditorRenderData(entity, meshRenderer.gameObject, true);
+                }
+                else
+                {
+                    for (var m = 0; m != materialCount; m++)
                     {
-                        dst.material = materials[0];
-                        dst.subMesh = 0;
+                        var meshEntity = conversionSystem.CreateAdditionalEntity(meshRenderer);
 
-                        DstEntityManager.AddSharedComponentData(entity, dst);
-                        DstEntityManager.AddComponentData(entity, new PerInstanceCullingTag());
-                        DstEntityManager.AddComponentData(entity, new RenderBounds {Value = mesh.bounds.ToAABB()});
+                        renderMesh.material = materials[m];
+                        renderMesh.subMesh = m;
+
+                        dstEntityManager.AddSharedComponentData(meshEntity, renderMesh);
+
+                        dstEntityManager.AddComponentData(meshEntity, new PerInstanceCullingTag());
+                        dstEntityManager.AddComponentData(meshEntity, new RenderBounds { Value = mesh.bounds.ToAABB() });
+                        dstEntityManager.AddComponentData(meshEntity, new LocalToWorld { Value = localToWorld });
+
+                        if (!dstEntityManager.HasComponent<Static>(meshEntity))
+                        {
+                            dstEntityManager.AddComponentData(meshEntity, new Parent { Value = entity });
+                            dstEntityManager.AddComponentData(meshEntity, new LocalToParent { Value = float4x4.identity });
+                        }
 
                         if (flipWinding)
-                            DstEntityManager.AddComponent(entity,
-                                ComponentType.ReadWrite<RenderMeshFlippedWindingTag>());
+                            dstEntityManager.AddComponent(meshEntity, ComponentType.ReadWrite<RenderMeshFlippedWindingTag>());
 
-                        ConfigureEditorRenderData(entity, meshRenderer.gameObject, true);
+                        conversionSystem.ConfigureEditorRenderData(meshEntity, meshRenderer.gameObject, true);
                     }
-                    else
-                    {
-                        for (var m = 0; m != materialCount; m++)
-                        {
-                            var meshEntity = CreateAdditionalEntity(meshRenderer);
-
-                            dst.material = materials[m];
-                            dst.subMesh = m;
-
-                            DstEntityManager.AddSharedComponentData(meshEntity, dst);
-
-                            DstEntityManager.AddComponentData(meshEntity, new PerInstanceCullingTag());
-                            DstEntityManager.AddComponentData(meshEntity,
-                                new RenderBounds {Value = mesh.bounds.ToAABB()});
-
-                            DstEntityManager.AddComponentData(meshEntity, new LocalToWorld {Value = localToWorld});
-                            if (!DstEntityManager.HasComponent<Static>(meshEntity))
-                            {
-                                DstEntityManager.AddComponentData(meshEntity, new Parent {Value = entity});
-                                DstEntityManager.AddComponentData(meshEntity,
-                                    new LocalToParent {Value = float4x4.identity});
-                            }
-
-                            if (flipWinding)
-                                DstEntityManager.AddComponent(meshEntity,
-                                    ComponentType.ReadWrite<RenderMeshFlippedWindingTag>());
-
-                            ConfigureEditorRenderData(meshEntity, meshRenderer.gameObject, true);
-                        }
-                    }
-
-                    sceneBounds.Encapsulate(meshRenderer.bounds.ToAABB());
                 }
-            });
+            }
         }
     }
 }

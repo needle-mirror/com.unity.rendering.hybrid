@@ -74,6 +74,7 @@ namespace Unity.Rendering
         }
     }
 
+    [ConverterVersion("joe", 1)]
     [UpdateInGroup(typeof(PresentationSystemGroup))]
     [WorldSystemFilter(WorldSystemFilterFlags.Default | WorldSystemFilterFlags.EntitySceneOptimizations)]
     [UpdateAfter(typeof(RenderBoundsUpdateSystem))]
@@ -191,15 +192,20 @@ namespace Unity.Rendering
             EntityManager.AddComponent(m_MissingLodRequirement, typeof(LodRequirement));
             EntityManager.AddComponent(m_MissingRootLodRequirement, typeof(RootLodRequirement));
 
-            var updateLodJob = new UpdateLodRequirementsJob
+            if (!m_Group.IsEmptyIgnoreFilter)
             {
-                MeshLODGroupComponent = GetComponentDataFromEntity<MeshLODGroupComponent>(true),
-                MeshLODComponent = GetArchetypeChunkComponentType<MeshLODComponent>(true),
-                LocalToWorldLookup = GetComponentDataFromEntity<LocalToWorld>(true),
-                LodRequirement = GetArchetypeChunkComponentType<LodRequirement>(),
-                RootLodRequirement = GetArchetypeChunkComponentType<RootLodRequirement>(),
-            };
-            return updateLodJob.Schedule(m_Group, dependency);
+                var updateLodJob = new UpdateLodRequirementsJob
+                {
+                    MeshLODGroupComponent = GetComponentDataFromEntity<MeshLODGroupComponent>(true),
+                    MeshLODComponent = GetArchetypeChunkComponentType<MeshLODComponent>(true),
+                    LocalToWorldLookup = GetComponentDataFromEntity<LocalToWorld>(true),
+                    LodRequirement = GetArchetypeChunkComponentType<LodRequirement>(),
+                    RootLodRequirement = GetArchetypeChunkComponentType<RootLodRequirement>(),
+                };
+                return updateLodJob.Schedule(m_Group, dependency);
+            }
+
+            return dependency;
         }
     }
 }

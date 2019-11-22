@@ -3,6 +3,7 @@ using Unity.Transforms;
 
 namespace Unity.Rendering
 {
+    [ConverterVersion("joe", 1)]
     [WorldSystemFilter(WorldSystemFilterFlags.EntitySceneOptimizations)]
     [UpdateAfter(typeof(LodRequirementsUpdateSystem))]
     class FreezeStaticLODObjects : ComponentSystem
