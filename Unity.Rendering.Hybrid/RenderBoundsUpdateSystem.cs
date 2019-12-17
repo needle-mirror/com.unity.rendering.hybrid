@@ -117,7 +117,7 @@ namespace Unity.Rendering
     /// <summary>
     /// Updates WorldRenderBounds for anything that has LocalToWorld and RenderBounds (and ensures WorldRenderBounds exists)
     /// </summary>
-    [ConverterVersion("joe", 1)]
+    [ConverterVersion("joe", 2)]
     [UpdateInGroup(typeof(PresentationSystemGroup))]
     [UpdateAfter(typeof(CreateMissingRenderBoundsFromMeshRenderer))]
     [WorldSystemFilter(WorldSystemFilterFlags.Default | WorldSystemFilterFlags.EntitySceneOptimizations)]
@@ -163,7 +163,9 @@ namespace Unity.Rendering
                 new EntityQueryDesc
                 {
                     All = new[] {ComponentType.ReadOnly<RenderBounds>(), ComponentType.ReadOnly<LocalToWorld>()},
-                    None = new[] {ComponentType.ReadOnly<WorldRenderBounds>(), ComponentType.ReadOnly<Frozen>()}
+                    None = new[] {ComponentType.ReadOnly<WorldRenderBounds>(), ComponentType.ReadOnly<Frozen>()},
+                    Options = EntityQueryOptions.IncludeDisabled | EntityQueryOptions.IncludePrefab
+                    
                 }
             );
             
@@ -172,7 +174,8 @@ namespace Unity.Rendering
                 new EntityQueryDesc
                 {
                     All = new[] { ComponentType.ReadOnly<RenderBounds>(), ComponentType.ReadOnly<LocalToWorld>() },
-                    None = new[] { ComponentType.ChunkComponentReadOnly<ChunkWorldRenderBounds>(), ComponentType.ReadOnly<Frozen>() }
+                    None = new[] { ComponentType.ChunkComponentReadOnly<ChunkWorldRenderBounds>(), ComponentType.ReadOnly<Frozen>() },
+                    Options = EntityQueryOptions.IncludeDisabled | EntityQueryOptions.IncludePrefab
                 }
             );
 

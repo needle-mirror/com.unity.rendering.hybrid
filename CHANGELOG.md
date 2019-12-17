@@ -1,5 +1,14 @@
 # Change log
 
+## [0.3.1] - 2019-12-16
+
+**This version requires Unity 2019.3.0f1+**
+
+### Changes
+
+* Updated dependencies of this package.
+
+
 ## [0.3.0] - 2019-12-03
 
 ### Changes
