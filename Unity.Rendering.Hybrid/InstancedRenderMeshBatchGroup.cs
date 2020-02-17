@@ -180,15 +180,12 @@ namespace Unity.Rendering
                     var rootLodRequirements = chunk.GetNativeArray(RootLodRequirements);
                     var instanceLodRequirements = chunk.GetNativeArray(InstanceLodRequirements);
 
-                    var chunkInstanceIndex = 0;
-                    var rootIndex = 0;
                     float graceDistance = float.MaxValue;
 
-                    while (chunkInstanceIndex < chunkInstanceCount)
+                    for (int i = 0; i != chunkInstanceCount;i++)
                     {
-                        var rootLodRequirement = rootLodRequirements[rootIndex];
-                        var rootInstanceCount = rootLodRequirement.InstanceCount;
-
+                        var rootLodRequirement = rootLodRequirements[i];
+                        
                         var rootLodDistance = math.select(DistanceScale * math.length(LODParams.cameraPos - rootLodRequirement.LOD.WorldReferencePosition), DistanceScale, isOrtho);
 
                         float rootMinDist = math.select(rootLodRequirement.LOD.MinDist, 0.0f, forceLowLOD == 1);
@@ -201,31 +198,24 @@ namespace Unity.Rendering
 
                         if (rootLodIntersect)
                         {
-                            for (int i = 0; i < rootInstanceCount; i++)
+                            var instanceLodRequirement = instanceLodRequirements[i];
+                            var instanceDistance = math.select(DistanceScale * math.length(LODParams.cameraPos - instanceLodRequirement.WorldReferencePosition), DistanceScale, isOrtho);
+
+                            var instanceLodIntersect = (instanceDistance < instanceLodRequirement.MaxDist) && (instanceDistance >= instanceLodRequirement.MinDist);
+
+                            graceDistance = math.min(math.abs(instanceDistance - instanceLodRequirement.MinDist), graceDistance);
+                            graceDistance = math.min(math.abs(instanceDistance - instanceLodRequirement.MaxDist), graceDistance);
+                            
+                            if (instanceLodIntersect)
                             {
-                                var instanceLodRequirement = instanceLodRequirements[chunkInstanceIndex + i];
-                                var instanceDistance = math.select(DistanceScale * math.length(LODParams.cameraPos - instanceLodRequirement.WorldReferencePosition), DistanceScale, isOrtho);
+                                var wordIndex = i >> 6;
+                                var bitIndex = i & 0x3f;
+                                var lodWord = chunkEntityLodEnabled.Enabled[wordIndex];
 
-                                var instanceLodIntersect = (instanceDistance < instanceLodRequirement.MaxDist) && (instanceDistance >= instanceLodRequirement.MinDist);
-
-                                graceDistance = math.min(math.abs(instanceDistance - instanceLodRequirement.MinDist), graceDistance);
-                                graceDistance = math.min(math.abs(instanceDistance - instanceLodRequirement.MaxDist), graceDistance);
-                                
-                                if (instanceLodIntersect)
-                                {
-                                    var index = chunkInstanceIndex + i;
-                                    var wordIndex = index >> 6;
-                                    var bitIndex = index & 0x3f;
-                                    var lodWord = chunkEntityLodEnabled.Enabled[wordIndex];
-
-                                    lodWord |= 1UL << bitIndex;
-                                    chunkEntityLodEnabled.Enabled[wordIndex] = lodWord;
-                                }
+                                lodWord |= 1UL << bitIndex;
+                                chunkEntityLodEnabled.Enabled[wordIndex] = lodWord;
                             }
                         }
-
-                        chunkInstanceIndex += rootInstanceCount;
-                        rootIndex++;
                     }
 
                     chunkData.MovementGraceFixed16 = Fixed16CamDistance.FromFloatFloor(graceDistance);
@@ -252,8 +242,8 @@ namespace Unity.Rendering
     [BurstCompile]
     unsafe struct SimpleCullingJob : IJobNativeMultiHashMapVisitKeyValue<LocalGroupKey, BatchChunkData>
     {
-        [DeallocateOnJobCompletion] [ReadOnly] public NativeArray<FrustumPlanes.PlanePacket4> Planes;
-        [DeallocateOnJobCompletion] [NativeDisableParallelForRestriction] public NativeArray<BatchCullingState> BatchCullingStates;
+        [ReadOnly] public NativeArray<FrustumPlanes.PlanePacket4> Planes;
+        [NativeDisableParallelForRestriction] public NativeArray<BatchCullingState> BatchCullingStates;
         [ReadOnly] public NativeArray<int> InternalToExternalRemappingTable;
 
         [ReadOnly] public ArchetypeChunkComponentType<WorldRenderBounds> BoundsComponent;
@@ -503,10 +493,10 @@ namespace Unity.Rendering
             {
                 var type = typeInfo.Type;
                 if (typeof(IComponentData).IsAssignableFrom(type))
-                { 
+                {
                     var attributes = type.GetCustomAttributes(typeof(MaterialPropertyAttribute), false);
                     if (attributes.Length > 0)
-                    { 
+                    {
                         var format = ((MaterialPropertyAttribute)attributes[0]).Format;
                         int numFormatComponents = 1;
                         switch (format)
@@ -549,6 +539,7 @@ namespace Unity.Rendering
 
             m_CullingStats = null;
 #endif
+            m_CullingJobDependency.Complete();
             m_LocalIdPool.Dispose();
             m_ExternalToInternalIds.Dispose();
             m_InternalToExternalIds.Dispose();
@@ -636,7 +627,7 @@ namespace Unity.Rendering
             var resetLod = m_ResetLod || (!lodParams.Equals(m_PrevLODParams));
             if (resetLod)
             {
-                // Depend on all component ata we access + previous jobs since we are writing to a single
+                // Depend on all component data we access + previous jobs since we are writing to a single
                 // m_ChunkInstanceLodEnableds array.
                 var lodJobDependency = JobHandle.CombineDependencies(m_CullingJobDependency, m_CullingJobDependencyGroup.GetDependency());
 
@@ -674,7 +665,8 @@ namespace Unity.Rendering
             }
             else
             {
-                // Depend on all component ata we access + previous m_LODDependency job
+                // Depend on all component data we access + previous m_LODDependency job
+                // We do not need to depend on m_CullingJobDependency (This lets multiple culling jobs run in parallel to each other)
                 cullingDependency = JobHandle.CombineDependencies(m_LODDependency, m_CullingJobDependencyGroup.GetDependency());
             }
 
@@ -694,8 +686,9 @@ namespace Unity.Rendering
             };
 
             var simpleCullingJobHandle = simpleCullingJob.Schedule(m_BatchToChunkMap, singleThreaded ? 150000 : 1024, cullingDependency);
+            simpleCullingJobHandle = planes.Dispose(batchCullingStates.Dispose(simpleCullingJobHandle));
 
-            DidScheduleCullingJob(simpleCullingJobHandle);
+            m_CullingJobDependency = m_CullingJobDependencyGroup.AddDependency(JobHandle.CombineDependencies(m_CullingJobDependency, simpleCullingJobHandle));
 
             Profiler.EndSample();
             return simpleCullingJobHandle;
@@ -728,7 +721,7 @@ namespace Unity.Rendering
 
             if (externalBatchIndex > m_MaterialPropertyBlocks.Count - 1)
                 m_MaterialPropertyBlocks.Add(new MaterialPropertyBlock());
-            
+
             var propertyBlock = m_MaterialPropertyBlocks[externalBatchIndex];
             m_BatchRendererGroup.SetInstancingData(externalBatchIndex, batchInstanceCount, propertyBlock);
 
@@ -799,8 +792,8 @@ namespace Unity.Rendering
                                 break;
                         }
 
-                        m_MaterialPropertyPointers[numShaderMaterialProperties++] = new MaterialPropertyPointer 
-                        { 
+                        m_MaterialPropertyPointers[numShaderMaterialProperties++] = new MaterialPropertyPointer
+                        {
                             ptr = nativePtr,
                             type = m_ComponentSystem.GetArchetypeChunkComponentTypeDynamic(ComponentType.ReadOnly(m_MaterialPropertyTypes[materialPropertyIndex].typeIndex)),
                             numFormatComponents = m_MaterialPropertyTypes[materialPropertyIndex].numFormatComponents
@@ -813,7 +806,7 @@ namespace Unity.Rendering
             int runningOffset = 0;
             var previousArchetype = new EntityArchetype();
             int numActiveArchetypeMaterialProperties = 0;
-            var archetypeActiveMaterialProperties = new NativeArray<int>(kMaxArchetypeProperties, Allocator.Temp, NativeArrayOptions.UninitializedMemory); 
+            var archetypeActiveMaterialProperties = new NativeArray<int>(kMaxArchetypeProperties, Allocator.Temp, NativeArrayOptions.UninitializedMemory);
 
             for (int i = 0; i < chunkCount; ++i)
             {
@@ -858,7 +851,7 @@ namespace Unity.Rendering
                         }
                     }
                 }
-               
+
                 // Memcpy all material property instance data in [MaterialProperty] types to C++ side arrays
                 for (int j = 0; j < numActiveArchetypeMaterialProperties; j++)
                 {
@@ -887,7 +880,7 @@ namespace Unity.Rendering
 
             SanityCheck();
         }
-        
+
         private void SanityCheck()
         {
 #if false
@@ -1043,13 +1036,6 @@ namespace Unity.Rendering
         {
             m_CullingJobDependency.Complete();
             m_CullingJobDependencyGroup.CompleteDependency();
-        }
-
-
-        void DidScheduleCullingJob(JobHandle job)
-        {
-            m_CullingJobDependency = JobHandle.CombineDependencies(job, m_CullingJobDependency);
-            m_CullingJobDependencyGroup.AddDependency(job);
         }
     }
 }

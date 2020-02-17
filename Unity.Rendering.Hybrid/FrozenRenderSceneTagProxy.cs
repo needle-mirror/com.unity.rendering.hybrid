@@ -20,6 +20,11 @@ namespace Unity.Rendering
         {
             return SceneGUID.GetHashCode() ^ SectionIndex;
         }
+
+        public override string ToString()
+        {
+            return $"GUID: {SceneGUID} section: {SectionIndex}";
+        }
     }
 
     [UnityEngine.AddComponentMenu("")]

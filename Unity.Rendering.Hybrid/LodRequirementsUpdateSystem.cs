@@ -13,7 +13,6 @@ namespace Unity.Rendering
     struct RootLodRequirement : IComponentData
     {
         public LodRequirement LOD;
-        public int            InstanceCount;
     }
 
     struct LodRequirement : IComponentData
@@ -74,16 +73,46 @@ namespace Unity.Rendering
         }
     }
 
-    [ConverterVersion("joe", 1)]
-    [UpdateInGroup(typeof(PresentationSystemGroup))]
+    [ConverterVersion("joe", 2)]
+    [UpdateInGroup(typeof(StructuralChangePresentationSystemGroup))]
     [WorldSystemFilter(WorldSystemFilterFlags.Default | WorldSystemFilterFlags.EntitySceneOptimizations)]
-    [UpdateAfter(typeof(RenderBoundsUpdateSystem))]
+    [ExecuteAlways]
+    public class AddLodRequirementComponents : ComponentSystem
+    {
+        EntityQuery m_MissingRootLodRequirement;
+        EntityQuery m_MissingLodRequirement;
+
+        protected override void OnCreate()
+        {
+            m_MissingLodRequirement = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[] {ComponentType.ReadOnly<MeshLODComponent>()},
+                None = new[] {ComponentType.ReadOnly<LodRequirement>()},
+                Options = EntityQueryOptions.IncludeDisabled | EntityQueryOptions.IncludePrefab
+            });
+
+            m_MissingRootLodRequirement = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[] {ComponentType.ReadOnly<MeshLODComponent>()},
+                None = new[] {ComponentType.ReadOnly<RootLodRequirement>()},
+                Options = EntityQueryOptions.IncludeDisabled | EntityQueryOptions.IncludePrefab
+            });
+        }
+
+        protected override void  OnUpdate()
+        {
+            EntityManager.AddComponent(m_MissingLodRequirement, typeof(LodRequirement));
+            EntityManager.AddComponent(m_MissingRootLodRequirement, typeof(RootLodRequirement));
+        }
+    }
+
+    [ConverterVersion("joe", 1)]
+    [UpdateInGroup(typeof(UpdatePresentationSystemGroup))]
+    [WorldSystemFilter(WorldSystemFilterFlags.Default | WorldSystemFilterFlags.EntitySceneOptimizations)]
     [ExecuteAlways]
     public class LodRequirementsUpdateSystem : JobComponentSystem
     {
-        EntityQuery m_Group;
-        EntityQuery m_MissingRootLodRequirement;
-        EntityQuery m_MissingLodRequirement;
+        EntityQuery m_LodRenderers;
 
         [BurstCompile]
         struct UpdateLodRequirementsJob : IJobChunk
@@ -113,11 +142,7 @@ namespace Unity.Rendering
                     // Cannot take LocalToWorld from the instances, because they might not all share the same pivot
                     lodRequirement[i] = new LodRequirement(lodGroup, LocalToWorldLookup[lodGroupEntity], lodMask);
                 }
-
-                var rootLodIndex = -1;
-                var lastLodRootMask = 0;
-                var lastLodRootGroupEntity = Entity.Null;
-
+                
                 for (int i = 0; i < instanceCount; i++)
                 {
                     var meshLod = meshLods[i];
@@ -126,86 +151,47 @@ namespace Unity.Rendering
                     var parentMask = lodGroup.ParentMask;
                     var parentGroupEntity = lodGroup.ParentGroup;
                     
-                    //@TODO: Bring this optimization back
-                    //var changedRoot = parentGroupEntity != lastLodRootGroupEntity || parentMask != lastLodRootMask || i == 0;
-                    var changedRoot = true;
+                    RootLodRequirement rootLod;
 
-                    if (changedRoot)
+                    if (parentGroupEntity == Entity.Null)
                     {
-                        rootLodIndex++;
-                        RootLodRequirement rootLod;
-                        rootLod.InstanceCount = 1;
-
-                        if (parentGroupEntity == Entity.Null)
-                        {
-                            rootLod.LOD.WorldReferencePosition = new float3(0, 0, 0);
-                            rootLod.LOD.MinDist = 0;
-                            rootLod.LOD.MaxDist = 64000.0f;
-                        }
-                        else
-                        {
-                            var parentLodGroup = MeshLODGroupComponent[parentGroupEntity];
-                            rootLod.LOD = new LodRequirement(parentLodGroup, LocalToWorldLookup[parentGroupEntity], parentMask);
-                            rootLod.InstanceCount = 1;
-
-                            if (parentLodGroup.ParentGroup != Entity.Null)
-                                throw new System.NotImplementedException("Deep HLOD is not supported yet");
-                        }
-
-                        rootLodRequirement[rootLodIndex] = rootLod;
-                        lastLodRootGroupEntity = parentGroupEntity;
-                        lastLodRootMask = parentMask;
+                        rootLod.LOD.WorldReferencePosition = new float3(0, 0, 0);
+                        rootLod.LOD.MinDist = 0;
+                        rootLod.LOD.MaxDist = 64000.0f;
                     }
                     else
                     {
-                        var lastRoot = rootLodRequirement[rootLodIndex];
-                        lastRoot.InstanceCount++;
-                        rootLodRequirement[rootLodIndex] = lastRoot;
+                        var parentLodGroup = MeshLODGroupComponent[parentGroupEntity];
+                        rootLod.LOD = new LodRequirement(parentLodGroup, LocalToWorldLookup[parentGroupEntity], parentMask);
+
+                        if (parentLodGroup.ParentGroup != Entity.Null)
+                            throw new System.NotImplementedException("Deep HLOD is not supported yet");
                     }
-                }
 
-/*
-                var foundRootInstanceCount = 0;
-                for (int i = 0; i < rootLodIndex + 1; i++)
-                {
-                    var lastRoot = rootLodRequirement[i];
-                    foundRootInstanceCount += lastRoot.InstanceCount;
+                    rootLodRequirement[i] = rootLod;
                 }
-
-                if (chunk.Count != foundRootInstanceCount)
-                {
-                    throw new System.ArgumentException("Out of bounds");
-                }
-*/
             }
         }
 
         protected override void OnCreate()
         {
-            m_MissingLodRequirement = GetEntityQuery(typeof(MeshLODComponent), ComponentType.Exclude<LodRequirement>(), ComponentType.Exclude<Frozen>());
-            m_MissingRootLodRequirement = GetEntityQuery(typeof(MeshLODComponent), ComponentType.Exclude<RootLodRequirement>(), ComponentType.Exclude<Frozen>());
-            m_Group = GetEntityQuery(ComponentType.ReadOnly<LocalToWorld>(), ComponentType.ReadOnly<MeshLODComponent>(), typeof(LodRequirement), typeof(RootLodRequirement), ComponentType.Exclude<Frozen>());
+            m_LodRenderers = GetEntityQuery(ComponentType.ReadOnly<LocalToWorld>(), ComponentType.ReadOnly<MeshLODComponent>(), typeof(LodRequirement), typeof(RootLodRequirement));
         }
 
         protected override JobHandle OnUpdate(JobHandle dependency)
         {
-            EntityManager.AddComponent(m_MissingLodRequirement, typeof(LodRequirement));
-            EntityManager.AddComponent(m_MissingRootLodRequirement, typeof(RootLodRequirement));
-
-            if (!m_Group.IsEmptyIgnoreFilter)
+            //@TODO: Updating of LodRequirement & RootLodRequirement has to be push based,
+            //       Otherwise how do we quickly early out when nothing has changed.
+            
+            var updateLodJob = new UpdateLodRequirementsJob
             {
-                var updateLodJob = new UpdateLodRequirementsJob
-                {
-                    MeshLODGroupComponent = GetComponentDataFromEntity<MeshLODGroupComponent>(true),
-                    MeshLODComponent = GetArchetypeChunkComponentType<MeshLODComponent>(true),
-                    LocalToWorldLookup = GetComponentDataFromEntity<LocalToWorld>(true),
-                    LodRequirement = GetArchetypeChunkComponentType<LodRequirement>(),
-                    RootLodRequirement = GetArchetypeChunkComponentType<RootLodRequirement>(),
-                };
-                return updateLodJob.Schedule(m_Group, dependency);
-            }
-
-            return dependency;
+                MeshLODGroupComponent = GetComponentDataFromEntity<MeshLODGroupComponent>(true),
+                MeshLODComponent = GetArchetypeChunkComponentType<MeshLODComponent>(true),
+                LocalToWorldLookup = GetComponentDataFromEntity<LocalToWorld>(true),
+                LodRequirement = GetArchetypeChunkComponentType<LodRequirement>(),
+                RootLodRequirement = GetArchetypeChunkComponentType<RootLodRequirement>(),
+            };
+            return updateLodJob.ScheduleParallel(m_LodRenderers, dependency);
         }
     }
 }

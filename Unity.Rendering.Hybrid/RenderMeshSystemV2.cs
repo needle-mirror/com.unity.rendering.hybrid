@@ -57,7 +57,7 @@ namespace Unity.Rendering
     //@TODO: Necessary due to empty component group. When Component group and archetype chunks are unified this should be removed
     [AlwaysUpdateSystem]
     [UpdateInGroup(typeof(PresentationSystemGroup))]
-    [UpdateAfter(typeof(LodRequirementsUpdateSystem))]
+    [UpdateAfter(typeof(UpdatePresentationSystemGroup))]
     public class RenderMeshSystemV2 : JobComponentSystem
     {
         int m_LastFrozenChunksOrderVersion = -1;
@@ -220,7 +220,7 @@ namespace Unity.Rendering
 
                 if (EntityManager.GetSharedComponentOrderVersion(scene) != version)
                 {
-                    // Debug.Log($"Removing scene:{scene:X8} batches");
+                    // Debug.Log($"Removing scene:{scene} batches");
                     Profiler.BeginSample("Remove Subscene");
                     m_SubsceneTagVersion.Remove(scene);
                     m_InstancedRenderMeshBatchGroup.RemoveTag(scene);
@@ -248,6 +248,8 @@ namespace Unity.Rendering
                 if (alreadyTrackingSubscene)
                     continue;
 
+                //Debug.Log($"Adding scene: {subsceneTag} batch");
+                
                 m_FrozenGroup.SetSharedComponentFilter(subsceneTag);
 
                 var filteredChunks = m_FrozenGroup.CreateArchetypeChunkArray(Allocator.TempJob);
