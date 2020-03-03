@@ -1,5 +1,11 @@
 # Change log
 
+## [0.3.5] - 2020-03-03
+
+### Changed
+
+* Updated dependencies of this package.
+
 
 ## [0.3.4] - 2020-02-17
 
@@ -52,14 +58,13 @@
 
 ### Changes
 
-* Removed LightSystem and light conversion.
+* Removed `LightSystem` and light conversion.
 * Updated dependencies for this package.
 
 ### Upgrade guide
 
-* LightSystem was removed
-  * Lightsystem was not performance by default and the concept of driving a game object from a component turned out to be not performance by default. It was also not maintainable because every property added to lights has to be reflected in this package.
-  * LightSystem will be replaced with hybrid entities in the future. This will be a more clean uniform API for graphics related functionalities. 
+  * `Lightsystem` was not performance by default and the concept of driving a game object from a component turned out to be not performance by default. It was also not maintainable because every property added to lights has to be reflected in this package.
+  * `LightSystem` will be replaced with hybrid entities in the future. This will be a more clean uniform API for graphics related functionalities.
 
 
 ## [0.1.1] - 2019-08-06 
