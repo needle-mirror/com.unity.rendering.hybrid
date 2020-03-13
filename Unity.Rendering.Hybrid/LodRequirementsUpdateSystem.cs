@@ -157,7 +157,7 @@ namespace Unity.Rendering
                     {
                         rootLod.LOD.WorldReferencePosition = new float3(0, 0, 0);
                         rootLod.LOD.MinDist = 0;
-                        rootLod.LOD.MaxDist = 64000.0f;
+                        rootLod.LOD.MaxDist = 1048576.0f;
                     }
                     else
                     {

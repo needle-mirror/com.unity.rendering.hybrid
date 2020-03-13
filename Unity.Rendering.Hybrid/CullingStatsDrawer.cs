@@ -27,7 +27,11 @@ namespace Unity.Rendering
         {
             if (m_Enabled)
             {
+#if ENABLE_HYBRID_RENDERER_V2 && UNITY_2020_1_OR_NEWER && (HDRP_9_0_0_OR_NEWER || URP_9_0_0_OR_NEWER)
+                var sys = World.Active.GetExistingSystem<HybridRendererSystem>();
+#else
                 var sys = World.Active.GetExistingSystem<RenderMeshSystemV2>();
+#endif
 
                 var stats = sys.ComputeCullingStats();
 

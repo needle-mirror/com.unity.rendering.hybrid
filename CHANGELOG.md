@@ -1,5 +1,47 @@
 # Change log
 
+## [0.4.0] - 2020-03-13
+
+### Added (All Versions)
+
+* HeapAllocator: Offset allocator for sub-allocating resources such as NativeArrays or ComputeBuffers.
+
+### Added (Hybrid V2)
+
+Hybrid Renderer V2 is a new experimental renderer. It has a significantly higher performance and better feature set compared to the existing hybrid renderer. However, it is not yet confirmed to work on all platforms. To enable Hybrid Renderer V2, use the `ENABLE_HYBRID_RENDERER_V2` define in the Project Settings.
+
+* HybridHDRPSamples Project for sample Scenes, unit tests and graphics tests.
+* HybridURPSamples Project for sample Scenes, unit tests and graphics tests.
+* MaterialOverride component: User friendly way to configure material overrides for shader properties.
+* MaterialOverrideAsset: MaterialOverride asset for configuring general material overrides tied to a shader.
+* SparseUploader: Delta update ECS data on GPU ComputeBuffer.
+* Support for Unity built-in material properties: See BuiltinMaterialProperties directory for all IComponentData structs.
+* Support for HDRP material properties: See HDRPMaterialProperties directory for all IComponentData structs.
+* Support for URP material properties: See URPMaterialProperties directory for all IComponentData structs.
+* New API (2020.1) to directly write to ComputeBuffer from parallel Burst jobs.
+* New API (2020.1) to render Hybrid V2 batches though optimized SRP Batcher backend.
+
+### Changes (Hybrid V2)
+
+* Full rewrite of RenderMeshSystemV2 and InstancedRenderMeshBatchGroup. New code is located at `HybridV2RenderSystem.cs`.
+* Partial rewrite of culling. Now all culling code is located at `HybridV2Culling.cs`.
+* Hybrid Renderer and culling no longer use hash maps or IJobNativeMultiHashMapVisitKeyMutableValue jobs. Chunk components and chunk/forEach jobs are used instead.
+* Batch setup and update now runs in parallel Burst jobs. Huge performance benefit.
+* GPU persistent data model. ComputeBuffer to store persistent data on GPU side. Use `chunk.DidChange<T>` to delta update only changed data. Huge performance benefit.
+* Per-instance shader constants are no longer setup to constant buffers for each viewport. This makes HDRP script main thread cost significantly smaller and saves significant amount of CPU time in render thread.
+
+### Fixed
+
+* Fixed culling issues (disappearing entities) 8000+ meters away from origin.
+* Fixes to solve chunk fragmentation issues with ChunkWorldRenderBounds and other chunk components. Some changes were already included in 0.3.4 package, but not documented.
+* Removed unnecessary reference to Unity.RenderPipelines.HighDefinition.Runtime from asmdef.
+* Fixed uninitialized data issues causing flickering on some graphics backends (2020.1). 
+
+### Misc
+
+* Highlighting `RenderBounds` component change introduced in `0.3.4-preview.24` which was not part of the previous changelogs, see below.
+
+
 ## [0.3.5] - 2020-03-03
 
 ### Changed
@@ -12,6 +54,7 @@
 ### Changed
 
 * Updated dependencies of this package.
+* When creating entities from scratch with code, user now needs to manually add `RenderBounds` component. Instantiating prefab works as before.
 
 
 ## [0.3.3] - 2020-01-28
@@ -64,7 +107,7 @@
 ### Upgrade guide
 
   * `Lightsystem` was not performance by default and the concept of driving a game object from a component turned out to be not performance by default. It was also not maintainable because every property added to lights has to be reflected in this package.
-  * `LightSystem` will be replaced with hybrid entities in the future. This will be a more clean uniform API for graphics related functionalities.
+  * `LightSystem` will be replaced with hybrid entities in the future. This will be a more clean uniform API for graphics related functionalities. 
 
 
 ## [0.1.1] - 2019-08-06 

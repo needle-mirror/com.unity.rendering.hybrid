@@ -1,4 +1,6 @@
-﻿using System.Collections.Generic;
+﻿#if !ENABLE_HYBRID_RENDERER_V2
+
+using System.Collections.Generic;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Entities;
@@ -71,11 +73,11 @@ namespace Unity.Rendering
         NativeHashMap<FrozenRenderSceneTag, int> m_SubsceneTagVersion;
         NativeList<SubSceneTagOrderVersion> m_LastKnownSubsceneTagVersion;
 
-        #if UNITY_EDITOR
+#if UNITY_EDITOR
         EditorRenderData m_DefaultEditorRenderData = new EditorRenderData { SceneCullingMask = UnityEditor.SceneManagement.EditorSceneManager.DefaultSceneCullingMask };
-        #else
+#else
         EditorRenderData m_DefaultEditorRenderData = new EditorRenderData { SceneCullingMask = ~0UL };
-        #endif
+#endif
 
         protected override void OnCreate()
         {
@@ -309,3 +311,5 @@ namespace Unity.Rendering
 #endif
     }
 }
+
+#endif // !ENABLE_HYBRID_RENDERER_V2

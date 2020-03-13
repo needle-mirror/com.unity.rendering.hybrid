@@ -3,20 +3,207 @@ uid: hybrid-render-overview
 ---
 # DOTS Hybrid Renderer
 
-The Hybrid Rendering package provides systems and components for rendering ECS entities.
-
 ![](images/HybridRendererSplash.png)
 
-The term "hybrid renderer" is used because the renderer uses GameObjects, such as the camera and lights, to render ECS entities. 
+The Hybrid Renderer package provides systems and components for rendering ECS entities using Unity's existing rendering architecture. 
 
-## Overview
+Hybrid Renderer is not a full blown renderer: It collects the data needed to render the scene from DOTS entities, and sends this data to the Unity's existing rendering architecture. Scriptable render pipeline (SRP) is used to setup the rendering pipeline.
 
-An entity is rendered if it has both a LocalToWorld component, from the Unity.Transforms namespace, and a [RenderMesh](xref:Unity.Rendering.RenderMesh) component, from the Unity.Rendering namespace. The Hybrid Renderer systems adds other components needed for rendering, such as RenderBounds and PerInstanceCullingTag, automatically.
+Using ECS entities instead of GameObjects results in significantly improved runtime memory layout and performance in large scenes, while maintaining the ease of use of Unity's existing workflows.
 
-## GameObject to entity conversion
+This package contains two versions of the Hybrid Renderer: [Hybrid Renderer V1](#v1) and [Hybrid Renderer V2](#v2). Hybrid Renderer V1 is the existing DOTS hybrid rendering technology introduced in the Megacity project and released in 2019.1. Hybrid Renderer V2 is the improved hybrid rendering technology introduced in Unity 2020.1, which provides better performance and an improved feature set.
 
-To convert GameObjects in a scene to entities, the conversion system  looks for a [MeshRenderer](https://docs.unity3d.com/Manual/class-MeshRenderer.html) and [MeshFilter](https://docs.unity3d.com/Manual/class-MeshFilter.html) component on each GameObject and converts them into a RenderMesh component on the entity.
+## Render pipeline compatibility
 
-The conversion also reads the Transform of the GameObject and adds a corresponding LocalToWorld component to the entity created for that GameObject. (Depending on the Transform properties, the conversion can also add Translation, Rotation, and NonUniformScale components.)
+Hybrid Renderer V1 is compatible with the Built-in Render Pipeline, the Universal Render Pipeline (URP), and the High Definition Render Pipeline (HDRP). The supported feature set is limited.
+
+Hybrid Renderer V2 is compatible with URP, and HDRP. We aim to support the full feature set.
+
+## Enabling Hybrid Renderer
+
+When the Hybrid Renderer package is installed in your Project, Hybrid Renderer V1 is enabled by default.
+
+To enable Hybrid Renderer V2, add the **ENABLE_HYBRID_RENDERER_V2** define to your project's scripting define symbols:
+![](images/ProjectSettingsDialog.png)
+
+You need to have Unity 2020.1.a025 or later and the SRP 9.0.0-preview package installed in order to use Hybrid Renderer V2.
+
+You can confirm that Hybrid V2 is active by looking at the following line in the console window:
+```
+Hybrid Renderer V2 active, MaterialProperty component type count X / Y
+```
+
+## Hybrid Renderer overview
+
+### Runtime functionality
+
+Hybrid Renderer renders all entities having the following DOTS components: LocalToWorld, RenderMesh and RenderBounds. Other components required for rendering are automatically added at runtime.
+
+To add entities to your scene at runtime, it's recommended to instantiate prefabs rather than creating new entities from scratch. Prefabs are already converted to optimal data layout during DOTS conversion, and result in improved performance.
+
+### The GameObject conversion system
+
+This package includes GameObject conversion systems that convert various GameObjects into equivalent DOTS entities.
+
+To convert your GameObjects to DOTS entities, put them in a subscene or add ConvertToEntity component on them. Subscenes are preferable to ConvertToEntity, as the conversion can be done in the editor and stored to disk. This makes scene loading much faster compared to ConvertToEntity and saves memory at startup. 
+
+**Conversion process:**
+
+* [MeshRenderer](https://docs.unity3d.com/Manual/class-MeshRenderer.html) and [MeshFilter](https://docs.unity3d.com/Manual/class-MeshFilter.html) components on a GameObject convert into a DOTS RenderMesh component on the entity. Various other components can also be added depending on the scriptable render pipeline used.
+* [LODGroup](https://docs.unity3d.com/Manual/class-LODGroup.html) components in GameObject hierarchies convert to DOTS MeshLODGroupComponents. Each entity referred by the LODGroup component receives a DOTS MeshLODComponent.
+* Transform of the GameObject converts into DOTS LocalToWorld component on the entity. Depending on the Transform's properties, the conversion can also add DOTS Translation, Rotation, and NonUniformScale components.
+
+<a name="v1"></a>
+
+## Hybrid Renderer V1
+
+Hybrid Renderer V1 is the existing DOTS hybrid rendering technology introduced in the Megacity project and released in 2019.1. It supports a very limited feature set.
+
+**Features not supported:**
+* Motion blur (motion vectors missing)
+* Temporal antialiasing (motion vectors missing)
+* LOD Fade
+* Lightmaps
+* RenderLayer (layered lighting)
+* TransformParams (correct lighting for inverse scale)
+
+**Additional features not supported in URP:**
+* Point lights and spot lights
+* Light probes
+* Reflection probes
+
+### Setting up shaders for Hybrid Renderer V1
+
+Hybrid Renderer V1 only supports ShaderGraph based shaders. Built-in shaders such as HDRP/Lit are not supported.
+
+**How to set up shaders and material for Hybrid Renderer V1:**
+
+Enable **Enable GPU Instancing** on every material used with Hybrid Renderer:
+![](images/GPUInstancingMaterial.PNG)
+
+Unity 2019.1: Enable **DOTS Instancing** checkbox in ShaderGraph HDRP/Lit master node (cog menu):
+![](images/DOTSInstancingMasterNode.png)
+
+Unity 2019.2: Enable **GPU Instanced** checkbox in any ShaderGraph custom property:
+![](images/GPUInstancingProperty.png)
+
+Unity 2019.3+: Enable **Hybrid Instanced (experimental)** checkbox in any ShaderGraph custom property:
+![](images/HybridInstancingProperty.png)
+
+Unless every shader and material you use with Hybrid Renderer V1 is setup correctly, you might encounter visual issues. Unfortunately, there's no validation or error messages in Hybrid Renderer V1. The most common visual issues caused by incorrect Shader and Material setup are:
+
+* All entities rendering at position (0,0,0) in standalone builds
+* Flickering or incorrect colors, especially on DX12, Vulkan and Metal backends
+* Flickering/stretching polygons, especially on DX12, Vulkan and Metal backends 
+
+<a name="v2"></a>
+
+## Hybrid Renderer V2
+
+Hybrid Renderer V2 is the new improved hybrid rendering technology introduced in Unity 2020.1. This technology provides both better performance and an improved feature set. We have a new GPU-persistent data model with delta update to GPU memory directly from Burst C# jobs. The main thread bottleneck of Hybrid Renderer V1 is gone, and render thread performance is also improved. The new data model allows us to feed the shader built-in data from C#, allowing us to implement missing HDRP and URP features. 
+
+Hybrid Renderer V2 is compatible with following shader types: ShaderGraph, HDRP/Lit, HDRP/Unlit, URP/Lit, URP/Unlit. We are adding support for more shader types in future releases.
+
+**New features in 2020.1 + hybrid.renderer 0.3.6:**
+* Official URP support (minimal feature set)
+* Support for non-ShaderGraph shaders
+* Motion blur (motion vectors)
+* Temporal antialiasing (motion vectors)
+* RenderLayer (layered lighting)
+* TransformParams (correct lighting for inverse scale)
+* Hybrid Entities: Subscene support for Light, Camera and other managed components
+
+We now have a dedicated team working on Hybrid Renderer. Our aim is to add support for all MVP features of HDRP and URP.
+
+**IMPORTANT:** Hybrid Renderer V2 is experimental in 2020.1. We have validated it on Windows DX11 and Mac Metal backends in both editor and standalone builds. Our aim is to validate Vulkan, DX12, mobile device and console platform support for 2020.2.
+
+### HDRP & URP material property overrides
+
+Hybrid Renderer V2 supports per-entity override of various HDRP and URP material properties. We have a built-in library of IComponentData components you can add to your entities to override their material properties. You can also write C#/Burst code to setup and animate material override values at runtime.
+
+**Supported HDRP Material Property overrides:**
+* AlphaCutoff
+* AORemapMax
+* AORemapMin
+* BaseColor
+* DetailAlbedoScale
+* DetailNormalScale
+* DetailSmoothnessScale
+* DiffusionProfileHash
+* EmissiveColor
+* Metallic
+* Smoothness
+* SmoothnessRemapMax
+* SmoothnessRemapMin
+* SpecularColor
+* Thickness
+* ThicknessRemap
+* UnlitColor (HDRP/Unlit)
+
+**Supported URP Material Property overrides:**
+* BaseColor
+* BumpScale
+* Cutoff
+* EmissionColor
+* Metallic
+* OcclusionStrength
+* Smoothness
+* SpecColor
+
+If you want to override a built-in HDRP or URP property not listed here, you can do that with custom ShaderGraph material property overrides.
+
+### Custom ShaderGraph material property overrides
+
+You can create your own custom ShaderGraph properties, and expose them to DOTS as IComponentData. This allows you to write C#/Burst code to setup and animate your own shader inputs.
+
+Enable **Hybrid Instanced (experimental)** checkbox in your ShaderGraph custom property:
+![](images/HybridInstancingProperty.png)
+
+Then write a DOTS IComponentData struct:
+
+```C#
+[MaterialProperty("_Color", MaterialPropertyFormat.Float4)]
+public struct MyOwnColor : IComponentData
+{
+    public float4 Value;
+}
+```
+
+Ensure that the *Reference* name in ShaderGraph and the string name in MaterialProperty attribute match exactly. The type declared in the MaterialPropertyFormat should also be compatible with both the ShaderGraph and the struct data layout. If the binary size doesn't match, you will see an error message in the console window.
+
+Now you can write Burst C# system to animate your material property:
+
+```C#
+class AnimateMyOwnColorSystem : SystemBase
+{
+    protected override void OnUpdate()
+    {
+        Entities.ForEach((ref MyOwnColor color, in MyAnimationTime t) =>
+            {
+                color.Value = new float4(
+                    math.cos(t.Value + 1.0f), 
+                    math.cos(t.Value + 2.0f), 
+                    math.cos(t.Value + 3.0f), 
+                    1.0f);
+            })
+            .Schedule();
+    }
+}
+```
+
+## Sample projects
+
+Hybrid Renderer sample projects can be found at:
+* **HDRP:** HybridHDRPSamples directory
+* **URP:** HybridURPSamples directory
+
+Project folder structure:
+* **SampleScenes:** Contains all sample scenes, showcasing the supported features.
+* **StressTestScenes:** Contains stress test scenes for benchmarking. 
+* **Tests:** Graphics tests (for image comparisons).
+
+Sample projects are using Hybrid Renderer V2 and require Unity 2020.1.a025 or later and SRP 9.0.0-preview package.
+
+**IMPORTANT:** SRP 9.0.0-preview package is not currently released. The hybrid.renderer sample projects currently require cloning the SRP repository under the same parent folder as dots repository. SRP repository is located here: https://github.com/Unity-Technologies/ScriptableRenderPipeline. Checkout *hybrid-instancing2* branch.
 
 

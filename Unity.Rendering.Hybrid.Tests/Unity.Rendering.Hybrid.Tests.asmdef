@@ -1,9 +1,10 @@
 {
     "name": "Unity.Rendering.Hybrid.Tests",
     "references": [
+        "Unity.Rendering",
         "Unity.Rendering.Hybrid",
         "Unity.Transforms",
-        "Unity.Transforms.Hybrid",        
+        "Unity.Transforms.Hybrid",
         "Unity.Mathematics",
         "Unity.Mathematics.Extensions",
         "Unity.Mathematics.Extensions.Hybrid",
@@ -12,19 +13,35 @@
         "Unity.Entities.Tests",
         "Unity.Entities",
         "Unity.Entities.Hybrid",
-        "Unity.RenderPipelines.HighDefinition.Runtime"
-    ],
-    "optionalUnityReferences": [
-        "TestAssemblies"
+        "UnityEngine.TestRunner",
+        "UnityEditor.TestRunner",
+        "Unity.RenderPipelines.HighDefinition.Runtime",
+        "Unity.RenderPipelines.Universal.Runtime"
     ],
     "includePlatforms": [
         "Editor"
     ],
     "excludePlatforms": [],
     "allowUnsafeCode": true,
-    "overrideReferences": false,
-    "precompiledReferences": [],
-    "autoReferenced": true,
-    "defineConstraints": [],
-    "versionDefines": []
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
+    "versionDefines": [
+        {
+            "name": "com.unity.render-pipelines.high-definition",
+            "expression": "8.9.9",
+            "define": "HDRP_9_0_0_OR_NEWER"
+        },
+        {
+            "name": "com.unity.render-pipelines.universal",
+            "expression": "8.9.9",
+            "define": "URP_9_0_0_OR_NEWER"
+        }
+    ],
+    "noEngineReferences": false
 }

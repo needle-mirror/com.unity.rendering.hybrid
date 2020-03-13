@@ -1,12 +1,16 @@
 using System;
-using UnityEngine;
 
 namespace Unity.Rendering
 {
+    // TODO: Hybrid V2 doesn't need this anymore, but Hybrid V1 does. This type can be removed once
+    // Hybrid V1 is no longer supported.
     public enum MaterialPropertyFormat
     {
         Float,
+        Float2,
+        Float3,
         Float4,
+        Float2x4,
         Float4x4,
     }
 

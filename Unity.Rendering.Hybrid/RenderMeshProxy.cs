@@ -69,7 +69,9 @@ namespace Unity.Rendering
         /// For entities converted from GameObjects, this value is copied from the Receive Shadows property of the source
         /// Mesh Renderer Component.
         /// </remarks>
-        public bool                 receiveShadows;
+        public bool receiveShadows;
+
+        public bool needMotionVectorPass;
 
         /// <summary>
         /// Two RenderMesh objects are equal if their respective property values are equal.
@@ -84,7 +86,8 @@ namespace Unity.Rendering
                 subMesh == other.subMesh &&
                 layer == other.layer &&
                 castShadows == other.castShadows &&
-                receiveShadows == other.receiveShadows;
+                receiveShadows == other.receiveShadows &&
+                needMotionVectorPass == other.needMotionVectorPass;
         }
 
         /// <summary>
@@ -100,6 +103,7 @@ namespace Unity.Rendering
             hash ^= layer.GetHashCode();
             hash ^= castShadows.GetHashCode();
             hash ^= receiveShadows.GetHashCode();
+            hash ^= needMotionVectorPass.GetHashCode();
             return hash;
         }
     }

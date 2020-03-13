@@ -1,3 +1,6 @@
+#if !ENABLE_HYBRID_RENDERER_V2
+// #define DISABLE_HYBRID_V1_2019_3_INSTANCE_DATA
+
 using System;
 using System.Collections.Generic;
 using Unity.Burst;
@@ -242,8 +245,8 @@ namespace Unity.Rendering
     [BurstCompile]
     unsafe struct SimpleCullingJob : IJobNativeMultiHashMapVisitKeyValue<LocalGroupKey, BatchChunkData>
     {
-        [ReadOnly] public NativeArray<FrustumPlanes.PlanePacket4> Planes;
-        [NativeDisableParallelForRestriction] public NativeArray<BatchCullingState> BatchCullingStates;
+        [DeallocateOnJobCompletion] [ReadOnly] public NativeArray<FrustumPlanes.PlanePacket4> Planes;
+        [DeallocateOnJobCompletion] [NativeDisableParallelForRestriction] public NativeArray<BatchCullingState> BatchCullingStates;
         [ReadOnly] public NativeArray<int> InternalToExternalRemappingTable;
 
         [ReadOnly] public ArchetypeChunkComponentType<WorldRenderBounds> BoundsComponent;
@@ -462,6 +465,7 @@ namespace Unity.Rendering
         };
 
         List<MaterialPropertyType> m_MaterialPropertyTypes;
+        Dictionary<int, string> m_MaterialPropertyOverriddenBy;
         MaterialPropertyPointer[] m_MaterialPropertyPointers;
 
         public InstancedRenderMeshBatchGroup(EntityManager entityManager, ComponentSystemBase componentSystem, EntityQuery cullingJobDependencyGroup)
@@ -489,31 +493,48 @@ namespace Unity.Rendering
 
             // Collect all components with [MaterialProperty] attribute
             m_MaterialPropertyTypes = new List<MaterialPropertyType>();
+            m_MaterialPropertyOverriddenBy = new Dictionary<int, string>();
             foreach (var typeInfo in TypeManager.AllTypes)
             {
                 var type = typeInfo.Type;
                 if (typeof(IComponentData).IsAssignableFrom(type))
-                {
+                { 
                     var attributes = type.GetCustomAttributes(typeof(MaterialPropertyAttribute), false);
                     if (attributes.Length > 0)
-                    {
+                    { 
                         var format = ((MaterialPropertyAttribute)attributes[0]).Format;
                         int numFormatComponents = 1;
                         switch (format)
                         {
                             case MaterialPropertyFormat.Float: numFormatComponents = 1; break;
+                            case MaterialPropertyFormat.Float2: numFormatComponents = 2; break;
+                            case MaterialPropertyFormat.Float3: numFormatComponents = 3; break;
                             case MaterialPropertyFormat.Float4: numFormatComponents = 4; break;
+                            case MaterialPropertyFormat.Float2x4: numFormatComponents = 8; break;
                             case MaterialPropertyFormat.Float4x4: numFormatComponents = 16; break;
                         }
 
+                        string propertyName = ((MaterialPropertyAttribute) attributes[0]).Name;
+                        int nameID = Shader.PropertyToID(propertyName);
+
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
+                        if (m_MaterialPropertyOverriddenBy.ContainsKey(nameID))
+                        {
+                            string overridingComponent = m_MaterialPropertyOverriddenBy[nameID];
+                            throw new InvalidOperationException($"Component \"{type.Name}\" cannot override material property \"{propertyName}\" because it has already been overridden by component \"{overridingComponent}\"");
+                        }
+                        else
+                        {
+                            m_MaterialPropertyOverriddenBy[nameID] = type.Name;
+                        }
+                        
                         if (UnsafeUtility.SizeOf(type) != numFormatComponents * sizeof(float))
                         {
                             throw new InvalidOperationException($"Material property component {type} (size = {UnsafeUtility.SizeOf(type)}) cannot be reinterpreted as {numFormatComponents} floats (size = {numFormatComponents * sizeof(float)}). Sizes must match.");
                         }
 #endif
 
-                        m_MaterialPropertyTypes.Add(new MaterialPropertyType { typeIndex = TypeManager.GetTypeIndex(type), nameId = Shader.PropertyToID(((MaterialPropertyAttribute)attributes[0]).Name), nameIdArray = Shader.PropertyToID(((MaterialPropertyAttribute)attributes[0]).Name + "_Array"), format = format, numFormatComponents = numFormatComponents });
+                        m_MaterialPropertyTypes.Add(new MaterialPropertyType { typeIndex = TypeManager.GetTypeIndex(type), nameId = nameID, nameIdArray = Shader.PropertyToID(((MaterialPropertyAttribute)attributes[0]).Name + "_Array"), format = format, numFormatComponents = numFormatComponents });
                     }
                 }
             }
@@ -539,7 +560,6 @@ namespace Unity.Rendering
 
             m_CullingStats = null;
 #endif
-            m_CullingJobDependency.Complete();
             m_LocalIdPool.Dispose();
             m_ExternalToInternalIds.Dispose();
             m_InternalToExternalIds.Dispose();
@@ -627,7 +647,7 @@ namespace Unity.Rendering
             var resetLod = m_ResetLod || (!lodParams.Equals(m_PrevLODParams));
             if (resetLod)
             {
-                // Depend on all component data we access + previous jobs since we are writing to a single
+                // Depend on all component ata we access + previous jobs since we are writing to a single
                 // m_ChunkInstanceLodEnableds array.
                 var lodJobDependency = JobHandle.CombineDependencies(m_CullingJobDependency, m_CullingJobDependencyGroup.GetDependency());
 
@@ -665,8 +685,7 @@ namespace Unity.Rendering
             }
             else
             {
-                // Depend on all component data we access + previous m_LODDependency job
-                // We do not need to depend on m_CullingJobDependency (This lets multiple culling jobs run in parallel to each other)
+                // Depend on all component ata we access + previous m_LODDependency job
                 cullingDependency = JobHandle.CombineDependencies(m_LODDependency, m_CullingJobDependencyGroup.GetDependency());
             }
 
@@ -686,9 +705,8 @@ namespace Unity.Rendering
             };
 
             var simpleCullingJobHandle = simpleCullingJob.Schedule(m_BatchToChunkMap, singleThreaded ? 150000 : 1024, cullingDependency);
-            simpleCullingJobHandle = planes.Dispose(batchCullingStates.Dispose(simpleCullingJobHandle));
 
-            m_CullingJobDependency = m_CullingJobDependencyGroup.AddDependency(JobHandle.CombineDependencies(m_CullingJobDependency, simpleCullingJobHandle));
+            DidScheduleCullingJob(simpleCullingJobHandle);
 
             Profiler.EndSample();
             return simpleCullingJobHandle;
@@ -701,7 +719,7 @@ namespace Unity.Rendering
 
         public unsafe void AddBatch(FrozenRenderSceneTag tag, int rendererSharedComponentIndex, int batchInstanceCount, NativeArray<ArchetypeChunk> chunks, NativeArray<int> sortedChunkIndices, int startSortedIndex, int chunkCount, bool flippedWinding, EditorRenderData data)
         {
-            var bigBounds = new Bounds(new Vector3(0, 0, 0), new Vector3(16738.0f, 16738.0f, 16738.0f));
+            var bigBounds = new Bounds(new Vector3(0, 0, 0), new Vector3(1048576.0f, 1048576.0f, 1048576.0f));
 
             var rendererSharedComponent = m_EntityManager.GetSharedComponentData<RenderMesh>(rendererSharedComponentIndex);
             var mesh = rendererSharedComponent.mesh;
@@ -721,7 +739,7 @@ namespace Unity.Rendering
 
             if (externalBatchIndex > m_MaterialPropertyBlocks.Count - 1)
                 m_MaterialPropertyBlocks.Add(new MaterialPropertyBlock());
-
+            
             var propertyBlock = m_MaterialPropertyBlocks[externalBatchIndex];
             m_BatchRendererGroup.SetInstancingData(externalBatchIndex, batchInstanceCount, propertyBlock);
 
@@ -743,6 +761,10 @@ namespace Unity.Rendering
             var shader = material.shader;
             var numProperties = shader.GetPropertyCount();
             int numShaderMaterialProperties = 0;
+#if !DISABLE_HYBRID_V1_2019_3_INSTANCE_DATA
+            // This code was added in 2019.3. It is a big performance regression compared to original Megacity Hybrid Renderer. Added a define in 2020.1 to allow developers to disable it if they don't need it.
+            // Hybrid Renderer V2 adds this feature among other features and is a major performance uplift. Define ENABLE_HYBRID_RENDERER_V2 in your project properties to enable it. You need SRP 8.
+
             for (int i = 0; i < numProperties; ++i)
             {
                 var flags = shader.GetPropertyFlags(i);
@@ -773,6 +795,9 @@ namespace Unity.Rendering
                                 }
                                 break;
 
+                            // float2 and float3 are packed into float4s in cbuffer arrays, and are handled as such
+                            case MaterialPropertyFormat.Float2:
+                            case MaterialPropertyFormat.Float3:
                             case MaterialPropertyFormat.Float4:
                                 {
                                     var arr4 = m_BatchRendererGroup.GetBatchVectorArray(externalBatchIndex, m_MaterialPropertyTypes[materialPropertyIndex].nameIdArray);
@@ -792,21 +817,21 @@ namespace Unity.Rendering
                                 break;
                         }
 
-                        m_MaterialPropertyPointers[numShaderMaterialProperties++] = new MaterialPropertyPointer
-                        {
+                        m_MaterialPropertyPointers[numShaderMaterialProperties++] = new MaterialPropertyPointer 
+                        { 
                             ptr = nativePtr,
                             type = m_ComponentSystem.GetArchetypeChunkComponentTypeDynamic(ComponentType.ReadOnly(m_MaterialPropertyTypes[materialPropertyIndex].typeIndex)),
                             numFormatComponents = m_MaterialPropertyTypes[materialPropertyIndex].numFormatComponents
                         };
                     }
                 }
-
             }
+#endif // !DISABLE_HYBRID_V1_2019_3_INSTANCE_DATA
 
             int runningOffset = 0;
             var previousArchetype = new EntityArchetype();
             int numActiveArchetypeMaterialProperties = 0;
-            var archetypeActiveMaterialProperties = new NativeArray<int>(kMaxArchetypeProperties, Allocator.Temp, NativeArrayOptions.UninitializedMemory);
+            var archetypeActiveMaterialProperties = new NativeArray<int>(kMaxArchetypeProperties, Allocator.Temp, NativeArrayOptions.UninitializedMemory); 
 
             for (int i = 0; i < chunkCount; ++i)
             {
@@ -837,6 +862,10 @@ namespace Unity.Rendering
 
                 matrices += chunk.Count;
 
+#if !DISABLE_HYBRID_V1_2019_3_INSTANCE_DATA
+                // This code was added in 2019.3. It is a big performance regression compared to Megacity Hybrid Renderer. Added a define in 2020.1 to allow developers to disable it if they don't need it.
+                // Hybrid Renderer V2 adds this feature among other features and is a major performance uplift. Define ENABLE_HYBRID_RENDERER_V2 in your project properties to enable it. You need SRP 8.
+
                 // Go though all [MaterialProperty] component types in the chunk, and collect them to an array. Use same components until archetype changes.
                 if (previousArchetype != chunk.Archetype)
                 {
@@ -851,7 +880,7 @@ namespace Unity.Rendering
                         }
                     }
                 }
-
+               
                 // Memcpy all material property instance data in [MaterialProperty] types to C++ side arrays
                 for (int j = 0; j < numActiveArchetypeMaterialProperties; j++)
                 {
@@ -866,6 +895,7 @@ namespace Unity.Rendering
 
                     UnsafeUtility.MemCpy(dstData, srcData, copySize);
                 }
+#endif // !DISABLE_HYBRID_V1_2019_3_INSTANCE_DATA
 
                 runningOffset += chunk.Count;
             }
@@ -880,7 +910,7 @@ namespace Unity.Rendering
 
             SanityCheck();
         }
-
+        
         private void SanityCheck()
         {
 #if false
@@ -1037,5 +1067,14 @@ namespace Unity.Rendering
             m_CullingJobDependency.Complete();
             m_CullingJobDependencyGroup.CompleteDependency();
         }
+
+
+        void DidScheduleCullingJob(JobHandle job)
+        {
+            m_CullingJobDependency = JobHandle.CombineDependencies(job, m_CullingJobDependency);
+            m_CullingJobDependencyGroup.AddDependency(job);
+        }
     }
 }
+
+#endif // !ENABLE_HYBRID_RENDERER_V2

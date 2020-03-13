@@ -4,16 +4,16 @@
         "Unity.Entities",
         "Unity.Entities.Hybrid",
         "Unity.Transforms",
-	"Unity.Transforms.Hybrid",
+        "Unity.Transforms.Hybrid",
         "Unity.Collections",
         "Unity.Burst",
         "Unity.Jobs",
         "Unity.Mathematics",
         "Unity.Mathematics.Extensions",
         "Unity.Mathematics.Extensions.Hybrid",
-        "Unity.RenderPipelines.HighDefinition.Runtime"
+        "Unity.RenderPipelines.HighDefinition.Runtime",
+        "Unity.RenderPipelines.Universal.Runtime"
     ],
-    "optionalUnityReferences": [],
     "includePlatforms": [],
     "excludePlatforms": [],
     "allowUnsafeCode": true,
@@ -21,5 +21,17 @@
     "precompiledReferences": [],
     "autoReferenced": true,
     "defineConstraints": [],
-    "versionDefines": []
+    "versionDefines": [
+        {
+            "name": "com.unity.render-pipelines.high-definition",
+            "expression": "8.9.9",
+            "define": "HDRP_9_0_0_OR_NEWER"
+        },
+        {
+            "name": "com.unity.render-pipelines.universal",
+            "expression": "8.9.9",
+            "define": "URP_9_0_0_OR_NEWER"
+        }
+    ],
+    "noEngineReferences": false
 }

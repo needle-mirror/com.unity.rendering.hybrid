@@ -1,0 +1,40 @@
+#pragma kernel SparseUploader
+struct UploadOperation
+{
+    uint srcOffset;
+    uint dstOffset;
+    uint size;
+};
+
+StructuredBuffer<UploadOperation> operations;
+
+ByteAddressBuffer src;
+RWByteAddressBuffer dstAddr;
+
+#define NUM_THREADS 64
+#define NUM_BYTES_PER_THREAD 4
+#define NUM_BYTES_PER_GROUP (NUM_THREADS * NUM_BYTES_PER_THREAD)
+[numthreads(NUM_THREADS, 1, 1)]
+void SparseUploader(uint threadID : SV_GroupThreadID, uint groupID : SV_GroupID)
+{
+    UploadOperation operation = operations[groupID];
+
+    uint numFullWaves = operation.size / NUM_BYTES_PER_GROUP;
+
+    uint srcOffset = threadID * NUM_BYTES_PER_THREAD + operation.srcOffset;
+    uint dstOffset = threadID * NUM_BYTES_PER_THREAD + operation.dstOffset;
+    for (uint i = 0; i < numFullWaves; i += 1)
+    {
+        uint val = src.Load(srcOffset);
+		dstAddr.Store(dstOffset, val);
+
+        srcOffset += NUM_BYTES_PER_GROUP;
+        dstOffset += NUM_BYTES_PER_GROUP;
+    }
+
+    if (dstOffset < (operation.dstOffset + operation.size))
+    {
+        uint val = src.Load(srcOffset);
+		dstAddr.Store(dstOffset, val);
+    }
+}

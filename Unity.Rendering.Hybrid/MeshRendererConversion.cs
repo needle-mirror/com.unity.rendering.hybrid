@@ -7,7 +7,7 @@ using UnityEngine;
 
 namespace Unity.Rendering
 {
-    [ConverterVersion("joe", 1)]
+    [ConverterVersion("sebbbi", 5)]
     class MeshRendererConversion : GameObjectConversionSystem
     {
         const bool AttachToPrimaryEntityForSingleMaterial = true;
@@ -23,6 +23,77 @@ namespace Unity.Rendering
 
                 Convert(entity, DstEntityManager, this, meshRenderer, mesh, materials);
             });
+        }
+
+#if ENABLE_HYBRID_RENDERER_V2 && UNITY_2020_1_OR_NEWER && (HDRP_9_0_0_OR_NEWER || URP_9_0_0_OR_NEWER)
+        private static BuiltinMaterialPropertyUnity_MotionVectorsParams CreateMotionVectorsParams(ref RenderMesh mesh, ref Renderer meshRenderer)
+        {
+            float s_bias = -0.001f;
+            float hasLastPositionStream = mesh.needMotionVectorPass ? 1.0f : 0.0f;
+            var motionVectorGenerationMode = meshRenderer.motionVectorGenerationMode;
+            float forceNoMotion = (motionVectorGenerationMode == MotionVectorGenerationMode.ForceNoMotion) ? 0.0f : 1.0f;
+            float cameraVelocity = (motionVectorGenerationMode == MotionVectorGenerationMode.Camera) ? 0.0f : 1.0f;
+            return new BuiltinMaterialPropertyUnity_MotionVectorsParams{ Value = new float4( hasLastPositionStream, forceNoMotion, s_bias, cameraVelocity ) };
+        }
+#endif
+
+        private static void AddComponentsToEntity(
+            RenderMesh renderMesh, 
+            Entity entity, 
+            EntityManager dstEntityManager, 
+            GameObjectConversionSystem conversionSystem,
+            Renderer meshRenderer, 
+            Mesh mesh, 
+            List<Material> materials,
+            bool flipWinding,
+            int id)
+        {
+            renderMesh.material = materials[id];
+            renderMesh.subMesh = id;
+
+            dstEntityManager.AddSharedComponentData(entity, renderMesh);
+
+            dstEntityManager.AddComponentData(entity, new PerInstanceCullingTag());
+            dstEntityManager.AddComponentData(entity, new RenderBounds { Value = mesh.bounds.ToAABB() });
+
+            if (flipWinding)
+                dstEntityManager.AddComponent(entity, ComponentType.ReadWrite<RenderMeshFlippedWindingTag>());
+
+            conversionSystem.ConfigureEditorRenderData(entity, meshRenderer.gameObject, true);
+
+#if ENABLE_HYBRID_RENDERER_V2 && UNITY_2020_1_OR_NEWER && (HDRP_9_0_0_OR_NEWER || URP_9_0_0_OR_NEWER)
+            // Hybrid V2 uploads WorldToLocal from C# to rendering. Need to refresh it.
+            // TODO: Do this on GPU side in the copy compute shader. Would be free in BW bound shader!
+            dstEntityManager.AddComponent(entity, ComponentType.ReadWrite<WorldToLocal>());
+
+#if HDRP_9_0_0_OR_NEWER
+            // HDRP previous frame matrices (for motion vectors)
+            if (renderMesh.needMotionVectorPass)
+            {
+                dstEntityManager.AddComponent(entity, ComponentType.ReadWrite<BuiltinMaterialPropertyUnity_MatrixPreviousM>());
+                dstEntityManager.AddComponent(entity, ComponentType.ReadWrite<BuiltinMaterialPropertyUnity_MatrixPreviousMI>());
+            }
+            dstEntityManager.AddComponentData(entity, CreateMotionVectorsParams(ref renderMesh, ref meshRenderer));
+#endif
+
+            dstEntityManager.AddComponentData(entity, new BuiltinMaterialPropertyUnity_RenderingLayer
+            {
+                Value = new uint4(meshRenderer.renderingLayerMask, 0, 0, 0)
+            });
+
+            dstEntityManager.AddComponentData(entity, new BuiltinMaterialPropertyUnity_WorldTransformParams
+            {
+                Value = flipWinding ? new float4(0, 0, 0, -1) : new float4(0, 0, 0, 1)
+            });
+
+#if URP_9_0_0_OR_NEWER
+            // Default initialized light data for URP
+            dstEntityManager.AddComponentData(entity, new BuiltinMaterialPropertyUnity_LightData
+            {
+                Value = new float4(0, 0, 1, 0)
+            });
+#endif
+#endif
         }
 
         public static void Convert(
@@ -46,50 +117,49 @@ namespace Unity.Rendering
                     layer = meshRenderer.gameObject.layer
                 };
 
+                renderMesh.needMotionVectorPass = (meshRenderer.motionVectorGenerationMode == MotionVectorGenerationMode.Object) ||
+                                                  (meshRenderer.motionVectorGenerationMode == MotionVectorGenerationMode.ForceNoMotion);
+
                 //@TODO: Transform system should handle RenderMeshFlippedWindingTag automatically. This should not be the responsibility of the conversion system.
                 float4x4 localToWorld = meshRenderer.transform.localToWorldMatrix;
                 var flipWinding = math.determinant(localToWorld) < 0.0;
 
                 if (materialCount == 1 && AttachToPrimaryEntityForSingleMaterial)
                 {
-                    renderMesh.material = materials[0];
-                    renderMesh.subMesh = 0;
-
-                    dstEntityManager.AddSharedComponentData(entity, renderMesh);
-
-                    dstEntityManager.AddComponentData(entity, new PerInstanceCullingTag());
-                    dstEntityManager.AddComponentData(entity, new RenderBounds { Value = mesh.bounds.ToAABB() });
-
-                    if (flipWinding)
-                        dstEntityManager.AddComponent(entity, ComponentType.ReadWrite<RenderMeshFlippedWindingTag>());
-
-                    conversionSystem.ConfigureEditorRenderData(entity, meshRenderer.gameObject, true);
+                    AddComponentsToEntity(
+                        renderMesh, 
+                        entity, 
+                        dstEntityManager, 
+                        conversionSystem,
+                        meshRenderer, 
+                        mesh, 
+                        materials,
+                        flipWinding,
+                        0);
                 }
                 else
                 {
                     for (var m = 0; m != materialCount; m++)
                     {
                         var meshEntity = conversionSystem.CreateAdditionalEntity(meshRenderer);
-
-                        renderMesh.material = materials[m];
-                        renderMesh.subMesh = m;
-
-                        dstEntityManager.AddSharedComponentData(meshEntity, renderMesh);
-
-                        dstEntityManager.AddComponentData(meshEntity, new PerInstanceCullingTag());
-                        dstEntityManager.AddComponentData(meshEntity, new RenderBounds { Value = mesh.bounds.ToAABB() });
+                        
                         dstEntityManager.AddComponentData(meshEntity, new LocalToWorld { Value = localToWorld });
-
                         if (!dstEntityManager.HasComponent<Static>(meshEntity))
                         {
                             dstEntityManager.AddComponentData(meshEntity, new Parent { Value = entity });
                             dstEntityManager.AddComponentData(meshEntity, new LocalToParent { Value = float4x4.identity });
                         }
-
-                        if (flipWinding)
-                            dstEntityManager.AddComponent(meshEntity, ComponentType.ReadWrite<RenderMeshFlippedWindingTag>());
-
-                        conversionSystem.ConfigureEditorRenderData(meshEntity, meshRenderer.gameObject, true);
+                        
+                        AddComponentsToEntity(
+                            renderMesh, 
+                            meshEntity, 
+                            dstEntityManager, 
+                            conversionSystem,
+                            meshRenderer, 
+                            mesh, 
+                            materials,
+                            flipWinding,
+                            m);
                     }
                 }
             }

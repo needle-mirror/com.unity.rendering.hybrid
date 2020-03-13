@@ -10,9 +10,14 @@ namespace Unity.Rendering
     /// Copies the BoneIndexOffsets on the skinned entities to the index offsets material properties of the skinned mesh entities.
     /// </summary>
     [UpdateInGroup(typeof(PresentationSystemGroup))]
+#if ENABLE_HYBRID_RENDERER_V2 && UNITY_2020_1_OR_NEWER && (HDRP_9_0_0_OR_NEWER || URP_9_0_0_OR_NEWER)
+    [UpdateBefore(typeof(HybridRendererSystem))]
+#else
     [UpdateBefore(typeof(RenderMeshSystemV2))]
+#endif
     public class CopySkinnedEntityDataToRenderEntity : JobComponentSystem
     {
+#pragma warning disable 618
         [BurstCompile]
         private struct IterateSkinnedEntityRefJob : IJobForEachWithEntity<SkinnedEntityReference, BoneIndexOffsetMaterialProperty>
         {
@@ -27,6 +32,7 @@ namespace Unity.Rendering
                 boneIndexOffset = new BoneIndexOffsetMaterialProperty { Value = BoneIndexOffsets[skinnedEntity.Value].Value };
             }
         }
+#pragma warning restore 618
 
         protected override JobHandle OnUpdate(JobHandle inputDeps)
         {
