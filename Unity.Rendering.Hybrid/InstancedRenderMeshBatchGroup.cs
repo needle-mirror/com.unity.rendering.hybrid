@@ -1,5 +1,6 @@
 #if !ENABLE_HYBRID_RENDERER_V2
 // #define DISABLE_HYBRID_V1_2019_3_INSTANCE_DATA
+// #define DISABLE_HYBRID_V1_TIGHT_BOUNDS
 
 using System;
 using System.Collections.Generic;
@@ -719,6 +720,7 @@ namespace Unity.Rendering
 
         public unsafe void AddBatch(FrozenRenderSceneTag tag, int rendererSharedComponentIndex, int batchInstanceCount, NativeArray<ArchetypeChunk> chunks, NativeArray<int> sortedChunkIndices, int startSortedIndex, int chunkCount, bool flippedWinding, EditorRenderData data)
         {
+            // Create the batch with extremely large placeholder bounds at first
             var bigBounds = new Bounds(new Vector3(0, 0, 0), new Vector3(1048576.0f, 1048576.0f, 1048576.0f));
 
             var rendererSharedComponent = m_EntityManager.GetSharedComponentData<RenderMesh>(rendererSharedComponentIndex);
@@ -733,7 +735,7 @@ namespace Unity.Rendering
             {
                 return;
             }
-
+            
             Profiler.BeginSample("AddBatch");
             int externalBatchIndex = m_BatchRendererGroup.AddBatch(mesh, subMeshIndex, material, layer, castShadows, receiveShadows, flippedWinding, bigBounds, batchInstanceCount, null, data.PickableObject, data.SceneCullingMask);
 
@@ -831,7 +833,9 @@ namespace Unity.Rendering
             int runningOffset = 0;
             var previousArchetype = new EntityArchetype();
             int numActiveArchetypeMaterialProperties = 0;
-            var archetypeActiveMaterialProperties = new NativeArray<int>(kMaxArchetypeProperties, Allocator.Temp, NativeArrayOptions.UninitializedMemory); 
+            var archetypeActiveMaterialProperties = new NativeArray<int>(kMaxArchetypeProperties, Allocator.Temp, NativeArrayOptions.UninitializedMemory);
+
+            MinMaxAABB batchAABB = default;
 
             for (int i = 0; i < chunkCount; ++i)
             {
@@ -841,6 +845,13 @@ namespace Unity.Rendering
                 var localKey = new LocalGroupKey { Value = internalBatchIndex };
                 var hasLodData = chunk.Has(rootLodRequirements) && chunk.Has(instanceLodRequirements);
                 var hasPerInstanceCulling = !hasLodData || chunk.Has(perInstanceCullingTag);
+
+                #if !DISABLE_HYBRID_V1_TIGHT_BOUNDS
+                if (i == 0)
+                    batchAABB = (MinMaxAABB) bounds.Value;
+                else
+                    batchAABB.Encapsulate(bounds.Value);
+                #endif
 
                 Assert.IsTrue(chunk.Count <= 128);
 
@@ -899,6 +910,20 @@ namespace Unity.Rendering
 
                 runningOffset += chunk.Count;
             }
+
+            #if !DISABLE_HYBRID_V1_TIGHT_BOUNDS
+            // Now we know the accurate AABB of all chunks that belong to this batch.
+            // Update the render node with it, so things that rely on it (like built-in
+            // shadow cascades) don't produce unnecessarily bad results.
+            var batchBounds = (AABB) batchAABB;
+            var batchCenter = batchBounds.Center;
+            var batchSize = batchBounds.Size;
+            m_BatchRendererGroup.SetBatchBounds(
+                externalBatchIndex,
+                new Bounds(
+                    new Vector3(batchCenter.x, batchCenter.y, batchCenter.z),
+                    new Vector3(batchSize.x, batchSize.y, batchSize.z)));
+            #endif
 
             archetypeActiveMaterialProperties.Dispose();
 

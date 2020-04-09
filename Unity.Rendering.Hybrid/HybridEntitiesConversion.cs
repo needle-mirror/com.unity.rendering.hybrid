@@ -11,6 +11,7 @@ using UnityEngine.Rendering.HighDefinition;
 
 namespace Unity.Rendering
 {
+#if !TINY_0_22_0_OR_NEWER
     public class LightConversionSystem : GameObjectConversionSystem
     {
         protected override void OnUpdate()
@@ -138,4 +139,5 @@ namespace Unity.Rendering
             });
         }
     }
+#endif
 }

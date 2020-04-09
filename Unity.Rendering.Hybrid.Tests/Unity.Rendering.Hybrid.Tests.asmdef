@@ -41,6 +41,11 @@
             "name": "com.unity.render-pipelines.universal",
             "expression": "8.9.9",
             "define": "URP_9_0_0_OR_NEWER"
+        },
+        {
+            "name": "com.unity.tiny",
+            "expression": "0.21.9",
+            "define": "TINY_0_22_0_OR_NEWER"
         }
     ],
     "noEngineReferences": false

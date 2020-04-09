@@ -1,5 +1,23 @@
 # Change log
 
+## [0.4.1] - 2020-04-08
+
+### Added (Hybrid V2)
+
+* DisableRendering tag component for disabling rendering of entities
+
+### Changed
+
+* Improved hybrid.renderer landing document. Lots of new information.
+
+### Fixed
+
+* Fixed shadow mapping issues, especially when using the built-in renderer.
+
+### Misc
+
+* Highlighting additional changes introduced in `0.3.4-preview.24` which were not part of the previous changelogs, see below.
+
 ## [0.4.0] - 2020-03-13
 
 ### Added (All Versions)
@@ -35,7 +53,7 @@ Hybrid Renderer V2 is a new experimental renderer. It has a significantly higher
 * Fixed culling issues (disappearing entities) 8000+ meters away from origin.
 * Fixes to solve chunk fragmentation issues with ChunkWorldRenderBounds and other chunk components. Some changes were already included in 0.3.4 package, but not documented.
 * Removed unnecessary reference to Unity.RenderPipelines.HighDefinition.Runtime from asmdef.
-* Fixed uninitialized data issues causing flickering on some graphics backends (2020.1). 
+* Fixed uninitialized data issues causing flickering on some graphics backends (2020.1).
 
 ### Misc
 
@@ -55,6 +73,9 @@ Hybrid Renderer V2 is a new experimental renderer. It has a significantly higher
 
 * Updated dependencies of this package.
 * When creating entities from scratch with code, user now needs to manually add `RenderBounds` component. Instantiating prefab works as before.
+* Inactive GameObjects and Prefabs with `StaticOptimizeEntity` are now correctly treated as static
+* `RenderBoundsUpdateSystem` is no longer `public` (breaking)
+* deleted public `CreateMissingRenderBoundsFromMeshRenderer` system (breaking)
 
 
 ## [0.3.3] - 2020-01-28
@@ -107,10 +128,10 @@ Hybrid Renderer V2 is a new experimental renderer. It has a significantly higher
 ### Upgrade guide
 
   * `Lightsystem` was not performance by default and the concept of driving a game object from a component turned out to be not performance by default. It was also not maintainable because every property added to lights has to be reflected in this package.
-  * `LightSystem` will be replaced with hybrid entities in the future. This will be a more clean uniform API for graphics related functionalities. 
+  * `LightSystem` will be replaced with hybrid entities in the future. This will be a more clean uniform API for graphics related functionalities.
 
 
-## [0.1.1] - 2019-08-06 
+## [0.1.1] - 2019-08-06
 
 ### Fixes
 
@@ -149,14 +170,14 @@ Hybrid Renderer V2 is a new experimental renderer. It has a significantly higher
 
 ### Changes
 
-* Changing `entities` dependency to latest version (`0.0.12-preview.33`). 
+* Changing `entities` dependency to latest version (`0.0.12-preview.33`).
 
 
 ## [0.0.1-preview.12] - 2019-05-16
 
 ### Fixes
 
-* Adding/fixing `Equals` and `GetHashCode` for proxy components. 
+* Adding/fixing `Equals` and `GetHashCode` for proxy components.
 
 
 ## [0.0.1-preview.11] - 2019-05-01

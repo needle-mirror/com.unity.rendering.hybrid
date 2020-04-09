@@ -3,6 +3,7 @@
 // #define DEBUG_LOG_CHUNK_CHANGES
 // #define DEBUG_LOG_TOP_LEVEL
 // #define DEBUG_LOG_BATCHES
+// #define DEBUG_LOG_BATCH_FLAG_UPDATES
 // #define DEBUG_LOG_CHUNKS
 // #define DEBUG_LOG_UPLOADS
 // #define DEBUG_LOG_PROPERTIES
@@ -77,6 +78,7 @@ namespace Unity.Rendering
         public int PrevCount;
         public HybridChunkCullingData CullingData;
         public bool Valid;
+        public bool NeededMotionVectors;
     }
     
     // Burst currently does not support atomic AND and OR. Use compare-and-exchange based
@@ -191,6 +193,8 @@ namespace Unity.Rendering
         public ComponentTypeCache.BurstCompatibleTypeArray ComponentTypes;
         public ThreadedSparseUploader ThreadedSparseUploader;
         public NativeArray<long> UnreferencedInternalIndices;
+        public NativeArray<long> BatchRequiresFlagUpdate;
+        public NativeArray<long> BatchMotionVectorsEnabled;
         
         public NativeArray<ArchetypeChunk> NewChunks;
         public NativeArray<int> NumNewChunks;
@@ -203,6 +207,15 @@ namespace Unity.Rendering
 #if PROFILE_BURST_JOB_INTERNALS
         public ProfilerMarker ProfileAddUpload;
 #endif
+        
+        public unsafe void MarkBatchForFlagUpdate(int internalIndex, bool requireMotionVectors)
+        {
+            AtomicHelpers.IndexToQwIndexAndMask(internalIndex, out int qw, out long mask);
+            Debug.Assert(qw < BatchRequiresFlagUpdate.Length && qw < BatchMotionVectorsEnabled.Length);
+            AtomicHelpers.AtomicOr((long*)BatchRequiresFlagUpdate.GetUnsafePtr(), qw, mask);
+            if(requireMotionVectors)
+                AtomicHelpers.AtomicOr((long*)BatchMotionVectorsEnabled.GetUnsafePtr(), qw, mask);
+        }
         
         unsafe void MarkBatchAsReferenced(int internalIndex)
         {
@@ -252,7 +265,7 @@ namespace Unity.Rendering
             // TODO: Remove entityCountChanged once GetComponentVersion responds to entity deletion
             bool entityCountChanged = chunkInfo.PrevCount != chunk.Count;
             chunkInfo.PrevCount = chunk.Count;
-            
+
             fixed (ArchetypeChunkComponentTypeDynamic* fixedT0 = &ComponentTypes.t0)
             {
                 for (int i = chunkInfo.ChunkTypesBegin; i < chunkInfo.ChunkTypesEnd; ++i)
@@ -262,7 +275,7 @@ namespace Unity.Rendering
 
                     bool componentChanged = chunk.DidChange(type, LastSystemVersion);
                     bool copyComponentData = isNewChunk || entityCountChanged || componentChanged;
-                    
+
                     if (copyComponentData)
                     {
 #if DEBUG_LOG_PROPERTIES
@@ -295,6 +308,7 @@ namespace Unity.Rendering
     {
         public ArchetypeChunkComponentType<HybridChunkInfo> HybridChunkInfo;
         [ReadOnly] public ArchetypeChunkComponentType<ChunkHeader> ChunkHeader;
+        [ReadOnly] public ArchetypeChunkComponentType<LocalToWorld> LocalToWorld;
         public HybridChunkUpdater HybridChunkUpdater;
         
         public void Execute(ArchetypeChunk metaChunk, int chunkIndex, int firstEntityIndex)
@@ -308,6 +322,14 @@ namespace Unity.Rendering
             {
                 var chunkInfo = hybridChunkInfos[i];
                 var chunkHeader = chunkHeaders[i];
+                
+                bool localToWorldChange = chunkHeader.ArchetypeChunk.DidChange<LocalToWorld>(LocalToWorld, HybridChunkUpdater.LastSystemVersion);
+                if (chunkInfo.NeededMotionVectors != localToWorldChange)
+                {
+                    chunkInfo.NeededMotionVectors = localToWorldChange;
+                    HybridChunkUpdater.MarkBatchForFlagUpdate(chunkInfo.InternalIndex, chunkInfo.NeededMotionVectors);
+                }
+                
                 HybridChunkUpdater.ProcessChunk(ref chunkInfo, chunkHeader.ArchetypeChunk);
                 hybridChunkInfos[i] = chunkInfo;
             }
@@ -325,6 +347,7 @@ namespace Unity.Rendering
         {
             var chunk = NewChunks[index];
             var chunkInfo = chunk.GetChunkComponentData(HybridChunkInfo);
+            chunkInfo.NeededMotionVectors = true;
             Debug.Assert(chunkInfo.Valid);
             HybridChunkUpdater.ProcessExistingChunk(ref chunkInfo, chunk, true);
             chunk.SetChunkComponentData(HybridChunkInfo, chunkInfo);
@@ -377,7 +400,7 @@ namespace Unity.Rendering
             TypeDynamics = null;
         }
 
-        public int UsedTypeCount => UsedTypes.Length;
+        public int UsedTypeCount => UsedTypes.Count();
         
         public void UseType(int typeIndex)
         {
@@ -620,13 +643,17 @@ namespace Unity.Rendering
     public unsafe class HybridRendererSystem : JobComponentSystem
     {
         private EntityQuery m_CullingJobDependencyGroup;
-
+        private EntityQuery m_CullingGroup;
         private EntityQuery m_MissingHybridChunkInfo;
         private EntityQuery m_HybridRenderedQuery;
         private EntityQuery m_DisabledRenderingQuery;
 
+        private EntityQuery m_LodSelectGroup;
+
 #if UNITY_EDITOR
-        private EditorRenderData m_DefaultEditorRenderData = new EditorRenderData { SceneCullingMask = UnityEditor.SceneManagement.EditorSceneManager.DefaultSceneCullingMask };
+        private EditorRenderData m_DefaultEditorRenderData = new EditorRenderData
+            {SceneCullingMask = UnityEditor.SceneManagement.EditorSceneManager.DefaultSceneCullingMask};
+
         private uint m_PreviousDOTSReflectionVersionNumber = 0;
 #else
         private EditorRenderData m_DefaultEditorRenderData = new EditorRenderData { SceneCullingMask = ~0UL };
@@ -639,9 +666,16 @@ namespace Unity.Rendering
         const int kNumGatheredIndicesPerThread = 128 * 8; // Two cache lines per thread
         const int kBuiltinCbufferIndex = 0;
 
-        const int kMaxGPUPersistentInstanceDataSize = 1024*1024 * 64;  // 64 MB
+        const int kMaxGPUPersistentInstanceDataSize = 1024 * 1024 * 64; // 64 MB
         const int kMaxChunkMetadata = 256 * 1024;
 
+        private enum BatchFlags
+        {
+            NeedMotionVectorPassFlag = 0x1
+        };
+    
+        private const int kNeedMotionVectorPassFlag = 0x1;
+        
         private JobHandle m_CullingJobDependency;
         private JobHandle m_LODDependency;
         private BatchRendererGroup m_BatchRendererGroup;
@@ -827,6 +861,8 @@ namespace Unity.Rendering
             public UnsafeList<BatchProperty> Properties;
             public UnsafeList<BatchOverrideComponent> OverrideComponents;
             public UnsafeList<HeapBlock> ChunkMetadataAllocations;
+
+            public bool RequiresMotionVectorUpdates;
             
             public void Dispose()
             {
@@ -891,7 +927,26 @@ namespace Unity.Rendering
                     ComponentType.ReadOnly<DisableRendering>(),
                 },
             });
-            
+
+            m_LodSelectGroup = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[]
+                {
+                    ComponentType.ReadWrite<HybridChunkInfo>(),
+                    ComponentType.ReadOnly<ChunkHeader>()
+                },
+            });
+
+            m_CullingGroup = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[]
+                {
+                    ComponentType.ReadOnly<ChunkWorldRenderBounds>(),
+                    ComponentType.ReadOnly<ChunkHeader>(),
+                    ComponentType.ReadOnly<HybridChunkInfo>()
+                },
+            });
+
             m_BatchRendererGroup = new BatchRendererGroup(this.OnPerformCulling);
             // m_Tags = new NativeArray<FrozenRenderSceneTag>(kMaxBatchCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
             m_ForceLowLOD = new NativeArray<byte>(kMaxBatchCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
@@ -1270,6 +1325,8 @@ namespace Unity.Rendering
                     LODParams = lodParams,
                     RootLodRequirements = GetArchetypeChunkComponentType<RootLodRequirement>(true),
                     InstanceLodRequirements = GetArchetypeChunkComponentType<LodRequirement>(true),
+                    HybridChunkInfo = GetArchetypeChunkComponentType<HybridChunkInfo>(),
+                    ChunkHeader = GetArchetypeChunkComponentType<ChunkHeader>(),
                     CameraMoveDistanceFixed16 = Fixed16CamDistance.FromFloatCeil(cameraMoveDistance * lodParams.distanceScale),
                     DistanceScale = lodParams.distanceScale,
                     DistanceScaleChanged = lodDistanceScaleChanged,
@@ -1278,7 +1335,7 @@ namespace Unity.Rendering
 #endif
                 };
 
-                cullingDependency = m_LODDependency = selectLodEnabledJob.Schedule(this, lodJobDependency);
+                cullingDependency = m_LODDependency = selectLodEnabledJob.Schedule(m_LodSelectGroup, lodJobDependency);
 
                 m_PrevLODParams = lodParams;
                 m_PrevLodDistanceScale = lodParams.distanceScale;
@@ -1316,6 +1373,9 @@ namespace Unity.Rendering
                 Planes = planes,
                 InternalToExternalRemappingTable = m_InternalToExternalIds,
                 BatchCullingStates = batchCullingStates,
+                HybridChunkInfo = GetArchetypeChunkComponentType<HybridChunkInfo>(),
+                ChunkHeader = GetArchetypeChunkComponentType<ChunkHeader>(true),
+                ChunkWorldRenderBounds = GetArchetypeChunkComponentType<ChunkWorldRenderBounds>(true),
                 BoundsComponent = GetArchetypeChunkComponentType<WorldRenderBounds>(true),
                 IndexList = cullingContext.visibleIndices,
                 Batches = cullingContext.batchVisibility,
@@ -1325,7 +1385,7 @@ namespace Unity.Rendering
 #endif
             };
 
-            var simpleCullingJobHandle = simpleCullingJob.Schedule(this, cullingDependency);
+            var simpleCullingJobHandle = simpleCullingJob.Schedule(m_CullingGroup, cullingDependency);
             threadLocalIndexLists.Dispose(simpleCullingJobHandle);
 
             #if DEBUG_LOG_VISIBLE_INSTANCES
@@ -1352,7 +1412,7 @@ namespace Unity.Rendering
 
         public JobHandle UpdateAllBatches(JobHandle inputDependencies)
         {
-            int numAtStart = m_ExistingBatchInternalIndices.Length;
+            int numAtStart = m_ExistingBatchInternalIndices.Count();
             
             m_DefaultValueBlits.Clear();
             m_ChunkComponentCopyDescriptors.Clear();
@@ -1368,6 +1428,16 @@ namespace Unity.Rendering
             
             const int kNumBitsPerLong = sizeof(long) * 8;
             var unreferencedInternalIndices = new NativeArray<long>(
+                (InternalIndexRange + kNumBitsPerLong) / kNumBitsPerLong,
+                Allocator.TempJob,
+                NativeArrayOptions.ClearMemory);
+            
+            var batchFlagUpdates = new NativeArray<long>(
+                (InternalIndexRange + kNumBitsPerLong) / kNumBitsPerLong,
+                Allocator.TempJob,
+                NativeArrayOptions.ClearMemory);
+            
+            var batchMotionVectorsEnabled = new NativeArray<long>(
                 (InternalIndexRange + kNumBitsPerLong) / kNumBitsPerLong,
                 Allocator.TempJob,
                 NativeArrayOptions.ClearMemory);
@@ -1407,6 +1477,8 @@ namespace Unity.Rendering
                 ComponentTypes = m_ComponentTypeCache.ToBurstCompatible(Allocator.TempJob),
                 ThreadedSparseUploader =  m_ThreadedGPUUploader,
                 UnreferencedInternalIndices = unreferencedInternalIndices,
+                BatchRequiresFlagUpdate = batchFlagUpdates,
+                BatchMotionVectorsEnabled = batchMotionVectorsEnabled,
                 NewChunks = newChunks,
                 NumNewChunks = numNewChunksArray,
                 ChunkProperties = m_ChunkProperties,
@@ -1420,6 +1492,7 @@ namespace Unity.Rendering
             {
                 HybridChunkInfo = GetArchetypeChunkComponentType<HybridChunkInfo>(false),
                 ChunkHeader = GetArchetypeChunkComponentType<ChunkHeader>(true),
+                LocalToWorld = GetArchetypeChunkComponentType<LocalToWorld>(true),
                 HybridChunkUpdater = hybridChunkUpdater,
             };
             
@@ -1446,11 +1519,13 @@ namespace Unity.Rendering
                 hybridCompleted = updateNewChunksJob.Schedule(numNewChunks, kNumNewChunksPerThread);
                 hybridChunkUpdater.NewChunks.Dispose(hybridCompleted);
             }
-            
+
             hybridChunkUpdater.ComponentTypes.Dispose(hybridCompleted);
             newChunks.Dispose(hybridCompleted);
             numNewChunksArray.Dispose(hybridCompleted);
             
+            hybridCompleted.Complete();
+            UpdateBatchFlags(batchFlagUpdates, batchMotionVectorsEnabled);
 #else
             
             int numChunks = m_MetaEntitiesForHybridRenderableChunks.CalculateEntityCount();
@@ -1537,6 +1612,8 @@ namespace Unity.Rendering
 #endif
             
             unreferencedInternalIndices.Dispose();
+            batchFlagUpdates.Dispose();
+            batchMotionVectorsEnabled.Dispose();
             
             return hybridCompleted;
         }
@@ -1624,6 +1701,60 @@ namespace Unity.Rendering
 #endif
             
             return numRemoved;
+        }
+        
+        private void UpdateBatchFlags(
+            NativeArray<long> batchFlagUpdates,
+            NativeArray<long> batchMotionVectorsEnabled)
+        {
+#if DEBUG_LOG_BATCH_FLAG_UPDATES
+            int batchesNeedingMotionVectors = 0;
+            int batchesWithoutMotionVectors = 0;
+#endif
+            
+            int firstInQw = 0;
+            for (int i = 0; i < batchFlagUpdates.Length; ++i)
+            {
+                long qw = batchFlagUpdates[i];
+                while (qw != 0)
+                {
+                    int setBit = math.tzcnt(qw);
+                    long mask = (1L << setBit);
+                    int internalIndex = firstInQw + setBit;
+
+                    if (m_BatchInfos[internalIndex].RequiresMotionVectorUpdates)
+                    {
+                        bool needMotionVectors = (batchMotionVectorsEnabled[i] & mask) != 0;
+                        int externalBatchIndex = m_InternalToExternalIds[internalIndex];
+                        if (needMotionVectors)
+                        {
+#if DEBUG_LOG_BATCH_FLAG_UPDATES
+                            ++batchesNeedingMotionVectors;
+#endif
+                            m_BatchRendererGroup.SetBatchFlags(
+                                externalBatchIndex,
+                                (int) BatchFlags.NeedMotionVectorPassFlag);
+                        }
+                        else
+                        {
+#if DEBUG_LOG_BATCH_FLAG_UPDATES
+                            ++batchesWithoutMotionVectors;
+#endif
+                            m_BatchRendererGroup.SetBatchFlags(
+                                externalBatchIndex,
+                                0);
+                        }
+                    }
+
+                    qw &= ~mask;
+                }
+                firstInQw += (int)AtomicHelpers.kNumBitsInLong;
+            }
+             
+#if DEBUG_LOG_BATCH_FLAG_UPDATES
+            if(batchesNeedingMotionVectors != 0 || batchesWithoutMotionVectors != 0)
+                Debug.Log($"Settings batch flags. Batches needing motion vectors: {batchesNeedingMotionVectors}, Batches without: {batchesWithoutMotionVectors}");
+#endif
         }
 
         private void RemoveBatch(int internalBatchIndex)
@@ -2037,6 +2168,8 @@ namespace Unity.Rendering
                 m_BatchRendererGroup.SetBatchFlags(externalBatchIndex, 1);
 
             var batchInfo = CreateBatchInfo(ref createInfo, batchChunks, numInstances);
+
+            batchInfo.RequiresMotionVectorUpdates = renderMesh.needMotionVectorPass;
             
 #if DEBUG_LOG_BATCHES
             Debug.Log($"AddBatch(internalBatchIndex: {internalBatchIndex}, externalBatchIndex: {externalBatchIndex}, properties: {batchInfo.Properties.Length}, chunks: {batchChunks.Length}, numInstances: {numInstances}, mesh: {renderMesh.mesh}, material: {renderMesh.material})");

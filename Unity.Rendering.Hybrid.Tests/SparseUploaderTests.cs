@@ -18,6 +18,12 @@ namespace Unity.Rendering.Tests
         [Test]
         public void NoUploads()
         {
+            if (!SystemInfo.supportsComputeShaders)
+            {
+                Assert.Ignore("Skipped due to platform/computer not supporting compute shaders");
+                return;
+            }
+
             var buffer = new ComputeBuffer(1, UnsafeUtility.SizeOf<float>());
             var uploader = new SparseUploader(buffer);
 
@@ -31,6 +37,12 @@ namespace Unity.Rendering.Tests
         [Test]
         public void BasicUploads()
         {
+            if (!SystemInfo.supportsComputeShaders)
+            {
+                Assert.Ignore("Skipped due to platform/computer not supporting compute shaders");
+                return;
+            }
+
             var initialData = new ExampleStruct[1024];
 
             for (int i = 0; i < initialData.Length; ++i)
@@ -76,6 +88,12 @@ namespace Unity.Rendering.Tests
         [Test]
         public void BigUploads()
         {
+            if (!SystemInfo.supportsComputeShaders)
+            {
+                Assert.Ignore("Skipped due to platform/computer not supporting compute shaders");
+                return;
+            }
+
             var initialData = new ExampleStruct[4 * 1024];
 
             for (int i = 0; i < initialData.Length; ++i)
@@ -151,6 +169,12 @@ namespace Unity.Rendering.Tests
         [Test]
         public void UploadFromJobs()
         {
+            if (!SystemInfo.supportsComputeShaders)
+            {
+                Assert.Ignore("Skipped due to platform/computer not supporting compute shaders");
+                return;
+            }
+
             var initialData = new ExampleStruct[4 * 1024];
             var stride = UnsafeUtility.SizeOf<ExampleStruct>();
 

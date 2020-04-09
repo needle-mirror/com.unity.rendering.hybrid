@@ -7,28 +7,29 @@ uid: hybrid-render-overview
 
 The Hybrid Renderer package provides systems and components for rendering ECS entities using Unity's existing rendering architecture. 
 
-Hybrid Renderer is not a full blown renderer: It collects the data needed to render the scene from DOTS entities, and sends this data to the Unity's existing rendering architecture. Scriptable render pipeline (SRP) is used to setup the rendering pipeline.
+Hybrid Renderer is not a render pipeline: it is a system that collects the ECS data needed to render the scene made from DOTS entities, and sends this data to Unity's existing rendering architecture. Using ECS entities instead of GameObjects results in significantly improved runtime memory layout and performance in large scenes, and using Unity's existing rendering architecture maintains the compatibility and ease of use of Unity's existing workflows.
 
-Using ECS entities instead of GameObjects results in significantly improved runtime memory layout and performance in large scenes, while maintaining the ease of use of Unity's existing workflows.
+This package contains two versions of Hybrid Renderer:
 
-This package contains two versions of the Hybrid Renderer: [Hybrid Renderer V1](#v1) and [Hybrid Renderer V2](#v2). Hybrid Renderer V1 is the existing DOTS hybrid rendering technology introduced in the Megacity project and released in 2019.1. Hybrid Renderer V2 is the improved hybrid rendering technology introduced in Unity 2020.1, which provides better performance and an improved feature set.
+[Hybrid Renderer V1](#v1) is the existing DOTS hybrid rendering technology introduced in the Megacity project and released in 2019.1. It is no longer in active development.
+
+[Hybrid Renderer V2](#v2) is the improved hybrid rendering technology introduced in Unity 2020.1, which provides better performance and an improved feature set. It is in active development.
 
 ## Render pipeline compatibility
 
-Hybrid Renderer V1 is compatible with the Built-in Render Pipeline, the Universal Render Pipeline (URP), and the High Definition Render Pipeline (HDRP). The supported feature set is limited.
+Hybrid Renderer V1 is compatible with the Built-in Render Pipeline in Unity 2019.1 and above, the High Definition Render Pipeline (HDRP) in Unity 2019.1 and above, and the the Universal Render Pipeline (URP) in Unity 2020.1 and above. The supported feature set for all of these render pipelines is limited.
 
-Hybrid Renderer V2 is compatible with URP, and HDRP. We aim to support the full feature set.
+Hybrid Renderer V2 is compatible with Unity 2020.1 and above, HDRP version 9.0.0-preview and above, and URP version 9.0.0-preview and above. Hybrid Renderer V2 is early in development and some features are not yet supported, but we aim to support the full feature set.
 
 ## Enabling Hybrid Renderer
 
 When the Hybrid Renderer package is installed in your Project, Hybrid Renderer V1 is enabled by default.
 
-To enable Hybrid Renderer V2, add the **ENABLE_HYBRID_RENDERER_V2** define to your project's scripting define symbols:
+To use Hybrid Renderer V2 you need to have Unity 2020.1.0b3 or later, and version 9.0.0-preview or above of the HDRP or URP package. To enable Hybrid Renderer V2, add the **ENABLE_HYBRID_RENDERER_V2** define to your Project's Scripting Define symbols:
 ![](images/ProjectSettingsDialog.png)
 
-You need to have Unity 2020.1.a025 or later and the SRP 9.0.0-preview package installed in order to use Hybrid Renderer V2.
+When Hybrid Renderer V2 is active, Unity displays the following message in the Console window:
 
-You can confirm that Hybrid V2 is active by looking at the following line in the console window:
 ```
 Hybrid Renderer V2 active, MaterialProperty component type count X / Y
 ```
@@ -37,27 +38,27 @@ Hybrid Renderer V2 active, MaterialProperty component type count X / Y
 
 ### Runtime functionality
 
-Hybrid Renderer renders all entities having the following DOTS components: LocalToWorld, RenderMesh and RenderBounds. Other components required for rendering are automatically added at runtime.
+At runtime, Hybrid Renderer processes all entities that have the following DOTS components: LocalToWorld, RenderMesh and RenderBounds. It automatically adds other components required for rendering to these entities. These processed entities are added to batches, and batches are rendered using existing Unity rendering architecture.
 
-To add entities to your scene at runtime, it's recommended to instantiate prefabs rather than creating new entities from scratch. Prefabs are already converted to optimal data layout during DOTS conversion, and result in improved performance.
+To add entities to your Scene at runtime, it is better to instantiate Prefabs rather than to create new entities from scratch. Prefabs are already converted to optimal data layout during DOTS conversion, which results in improved performance.
 
 ### The GameObject conversion system
 
 This package includes GameObject conversion systems that convert various GameObjects into equivalent DOTS entities.
 
-To convert your GameObjects to DOTS entities, put them in a subscene or add ConvertToEntity component on them. Subscenes are preferable to ConvertToEntity, as the conversion can be done in the editor and stored to disk. This makes scene loading much faster compared to ConvertToEntity and saves memory at startup. 
+To convert your GameObjects to DOTS entities, you can either put them into a SubScene or add ConvertToEntity component on them. SubScenes are converted in the Unity Editor and stored to disk. ConvertToEntity results in runtime conversion. Conversion in Unity Editor results in significantly better scene loading performance.
 
 **Conversion process:**
 
-* [MeshRenderer](https://docs.unity3d.com/Manual/class-MeshRenderer.html) and [MeshFilter](https://docs.unity3d.com/Manual/class-MeshFilter.html) components on a GameObject convert into a DOTS RenderMesh component on the entity. Various other components can also be added depending on the scriptable render pipeline used.
-* [LODGroup](https://docs.unity3d.com/Manual/class-LODGroup.html) components in GameObject hierarchies convert to DOTS MeshLODGroupComponents. Each entity referred by the LODGroup component receives a DOTS MeshLODComponent.
-* Transform of the GameObject converts into DOTS LocalToWorld component on the entity. Depending on the Transform's properties, the conversion can also add DOTS Translation, Rotation, and NonUniformScale components.
+* The conversion system converts [MeshRenderer](https://docs.unity3d.com/Manual/class-MeshRenderer.html) and [MeshFilter](https://docs.unity3d.com/Manual/class-MeshFilter.html) components into a DOTS RenderMesh component on the entity. Depending on the render pipeline your Project uses, the conversion system might also add other rendering-related components.
+* The conversion system converts [LODGroup](https://docs.unity3d.com/Manual/class-LODGroup.html) components in GameObject hierarchies to DOTS MeshLODGroupComponents. Each entity referred by the LODGroup component has a DOTS MeshLODComponent.
+* The conversion system converts the Transform of each GameObject into a DOTS LocalToWorld component on the entity. Depending on the Transform's properties, the conversion system might also add DOTS Translation, Rotation, and NonUniformScale components.
 
 <a name="v1"></a>
 
 ## Hybrid Renderer V1
 
-Hybrid Renderer V1 is the existing DOTS hybrid rendering technology introduced in the Megacity project and released in 2019.1. It supports a very limited feature set.
+Hybrid Renderer V1 is the existing DOTS hybrid rendering technology introduced in the Megacity project and released in 2019.1. It supports a very limited feature set. It is no longer in active development.
 
 **Features not supported:**
 * Motion blur (motion vectors missing)
@@ -96,13 +97,17 @@ Unless every shader and material you use with Hybrid Renderer V1 is setup correc
 * Flickering or incorrect colors, especially on DX12, Vulkan and Metal backends
 * Flickering/stretching polygons, especially on DX12, Vulkan and Metal backends 
 
+**IMPORTANT:** Unity 2020.1 and SRP 8.0.0 added official Hybrid Renderer V1 support for Universal Render Pipeline (URP). If you are using Hybrid Renderer V1 with URP with an older Unity version, you might see similar graphics issues as described above. 
+
 <a name="v2"></a>
 
 ## Hybrid Renderer V2
 
-Hybrid Renderer V2 is the new improved hybrid rendering technology introduced in Unity 2020.1. This technology provides both better performance and an improved feature set. We have a new GPU-persistent data model with delta update to GPU memory directly from Burst C# jobs. The main thread bottleneck of Hybrid Renderer V1 is gone, and render thread performance is also improved. The new data model allows us to feed the shader built-in data from C#, allowing us to implement missing HDRP and URP features. 
+Hybrid Renderer V2 is the new improved hybrid rendering technology introduced in Unity 2020.1. This technology provides both better performance and an improved feature set. It is in active development.
 
-Hybrid Renderer V2 is compatible with following shader types: ShaderGraph, HDRP/Lit, HDRP/Unlit, URP/Lit, URP/Unlit. We are adding support for more shader types in future releases.
+Hybrid Renderer V2 has a new GPU-persistent data model with delta update to GPU memory directly from Burst C# jobs. The main thread bottleneck of Hybrid Renderer V1 is gone, and render thread performance is also improved. The new data model allows us to feed the shader built-in data from C#, allowing us to implement missing HDRP and URP features. 
+
+Hybrid Renderer V2 is compatible with following shader types: ShaderGraph, HDRP/Lit, HDRP/Unlit, URP/Lit, URP/Unlit. We will add support for more shader types in future releases.
 
 **New features in 2020.1 + hybrid.renderer 0.3.6:**
 * Official URP support (minimal feature set)
@@ -112,10 +117,9 @@ Hybrid Renderer V2 is compatible with following shader types: ShaderGraph, HDRP/
 * RenderLayer (layered lighting)
 * TransformParams (correct lighting for inverse scale)
 * Hybrid Entities: Subscene support for Light, Camera and other managed components
+* DisableRendering component (disable rendering of an entity)
 
-We now have a dedicated team working on Hybrid Renderer. Our aim is to add support for all MVP features of HDRP and URP.
-
-**IMPORTANT:** Hybrid Renderer V2 is experimental in 2020.1. We have validated it on Windows DX11 and Mac Metal backends in both editor and standalone builds. Our aim is to validate Vulkan, DX12, mobile device and console platform support for 2020.2.
+**IMPORTANT:** Hybrid Renderer V2 is experimental in Unity 2020.1. We have validated it on Windows DX11, Vulkan and Mac Metal backends in both Editor and Standalone builds. Our aim is to validate DX12, mobile device and console platform support for 2020.2.
 
 ### HDRP & URP material property overrides
 
@@ -202,8 +206,6 @@ Project folder structure:
 * **StressTestScenes:** Contains stress test scenes for benchmarking. 
 * **Tests:** Graphics tests (for image comparisons).
 
-Sample projects are using Hybrid Renderer V2 and require Unity 2020.1.a025 or later and SRP 9.0.0-preview package.
+Sample projects are using Hybrid Renderer V2 and require Unity 2020.1.0b3 or later and version 9.0.0-preview of the HDRP and URP packages.
 
-**IMPORTANT:** SRP 9.0.0-preview package is not currently released. The hybrid.renderer sample projects currently require cloning the SRP repository under the same parent folder as dots repository. SRP repository is located here: https://github.com/Unity-Technologies/ScriptableRenderPipeline. Checkout *hybrid-instancing2* branch.
-
-
+**IMPORTANT:** Note that verion 9.0.0-preview package has not yet been released, and is not available in the Package Manager. To use these sample projects, you must clone the Scriptable Render Pipeline repository under the same parent folder as the DOTS repository. The Scriptable Render Pipeline repository is located here: https://github.com/Unity-Technologies/ScriptableRenderPipeline. 
