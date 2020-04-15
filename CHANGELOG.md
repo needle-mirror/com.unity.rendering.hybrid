@@ -1,6 +1,13 @@
 # Change log
 
-## [0.4.1] - 2020-04-08
+## [0.4.2] - 2020-04-15
+
+### Changes
+
+* Updated dependencies of this package.
+
+
+## [0.4.1] - 2020-04-09
 
 ### Added (Hybrid V2)
 
@@ -17,6 +24,7 @@
 ### Misc
 
 * Highlighting additional changes introduced in `0.3.4-preview.24` which were not part of the previous changelogs, see below.
+
 
 ## [0.4.0] - 2020-03-13
 
