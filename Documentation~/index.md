@@ -195,6 +195,8 @@ class AnimateMyOwnColorSystem : SystemBase
 }
 ```
 
+**IMPORTANT:** You need to create a matching IComponentData struct (described above) for EVERY custom ShaderGraph property having **Hybrid Instanced (experimental)** checkbox set. If you fail to do so, Hybrid Renderer will not fill these properties: Hybrid Renderer V1 leaves the data uninitialized (flickering). Hybrid Renderer V2 zero fills the data.
+
 ## Sample projects
 
 Hybrid Renderer sample projects can be found at:
@@ -207,5 +209,3 @@ Project folder structure:
 * **Tests:** Graphics tests (for image comparisons).
 
 Sample projects are using Hybrid Renderer V2 and require Unity 2020.1.0b3 or later and version 9.0.0-preview of the HDRP and URP packages.
-
-**IMPORTANT:** Note that verion 9.0.0-preview package has not yet been released, and is not available in the Package Manager. To use these sample projects, you must clone the Scriptable Render Pipeline repository under the same parent folder as the DOTS repository. The Scriptable Render Pipeline repository is located here: https://github.com/Unity-Technologies/ScriptableRenderPipeline. 

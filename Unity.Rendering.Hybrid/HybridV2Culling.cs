@@ -1,5 +1,3 @@
-#if ENABLE_HYBRID_RENDERER_V2 && UNITY_2020_1_OR_NEWER && (HDRP_9_0_0_OR_NEWER || URP_9_0_0_OR_NEWER)
-
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
@@ -66,26 +64,6 @@ using UnityEngine.Rendering;
 
 namespace Unity.Rendering
 {
-    public unsafe struct ChunkInstanceLodEnabled
-    {
-        public fixed ulong Enabled[2];
-    }
-
-    internal struct Fixed16CamDistance
-    {
-        public const float kRes = 100.0f;
-
-        public static ushort FromFloatCeil(float f)
-        {
-            return (ushort) math.clamp((int) math.ceil(f * kRes), 0, 0xffff);
-        }
-
-        public static ushort FromFloatFloor(float f)
-        {
-            return (ushort) math.clamp((int) math.floor(f * kRes), 0, 0xffff);
-        }
-    }
-
     [BurstCompile]
     unsafe struct SelectLodEnabled : IJobChunk
     {
@@ -101,12 +79,10 @@ namespace Unity.Rendering
         [ReadOnly] public ArchetypeChunkComponentType<ChunkHeader> ChunkHeader;
 
 #if UNITY_EDITOR
-        [NativeDisableUnsafePtrRestriction]
-        public CullingStats* Stats;
+        [NativeDisableUnsafePtrRestriction] public CullingStats* Stats;
 
 #pragma warning disable 649
-        [NativeSetThreadIndex]
-        public int ThreadIndex;
+        [NativeSetThreadIndex] public int ThreadIndex;
 #pragma warning restore 649
 
 #endif
@@ -182,7 +158,11 @@ namespace Unity.Rendering
                         {
                             var rootLodRequirement = rootLodRequirements[i];
 
-                            var rootLodDistance = math.select(DistanceScale * math.length(LODParams.cameraPos - rootLodRequirement.LOD.WorldReferencePosition), DistanceScale, isOrtho);
+                            var rootLodDistance =
+                                math.select(
+                                    DistanceScale *
+                                    math.length(LODParams.cameraPos - rootLodRequirement.LOD.WorldReferencePosition),
+                                    DistanceScale, isOrtho);
 
                             float rootMinDist = math.select(rootLodRequirement.LOD.MinDist, 0.0f, forceLowLOD == 1);
                             float rootMaxDist = rootLodRequirement.LOD.MaxDist;
@@ -195,12 +175,21 @@ namespace Unity.Rendering
                             if (rootLodIntersect)
                             {
                                 var instanceLodRequirement = instanceLodRequirements[i];
-                                var instanceDistance = math.select(DistanceScale * math.length(LODParams.cameraPos - instanceLodRequirement.WorldReferencePosition), DistanceScale, isOrtho);
+                                var instanceDistance =
+                                    math.select(
+                                        DistanceScale *
+                                        math.length(LODParams.cameraPos -
+                                            instanceLodRequirement.WorldReferencePosition), DistanceScale,
+                                        isOrtho);
 
-                                var instanceLodIntersect = (instanceDistance < instanceLodRequirement.MaxDist) && (instanceDistance >= instanceLodRequirement.MinDist);
+                                var instanceLodIntersect =
+                                    (instanceDistance < instanceLodRequirement.MaxDist) &&
+                                    (instanceDistance >= instanceLodRequirement.MinDist);
 
-                                graceDistance = math.min(math.abs(instanceDistance - instanceLodRequirement.MinDist), graceDistance);
-                                graceDistance = math.min(math.abs(instanceDistance - instanceLodRequirement.MaxDist), graceDistance);
+                                graceDistance = math.min(math.abs(instanceDistance - instanceLodRequirement.MinDist),
+                                    graceDistance);
+                                graceDistance = math.min(math.abs(instanceDistance - instanceLodRequirement.MaxDist),
+                                    graceDistance);
 
                                 if (instanceLodIntersect)
                                 {
@@ -222,40 +211,35 @@ namespace Unity.Rendering
 
 
 #if UNITY_EDITOR
-                if (oldEntityLodEnabled.Enabled[0] != chunkEntityLodEnabled.Enabled[0] || oldEntityLodEnabled.Enabled[1] != chunkEntityLodEnabled.Enabled[1])
+                if (oldEntityLodEnabled.Enabled[0] != chunkEntityLodEnabled.Enabled[0] ||
+                    oldEntityLodEnabled.Enabled[1] != chunkEntityLodEnabled.Enabled[1])
                 {
                     Stats[ThreadIndex].Stats[CullingStats.kLodChanged]++;
                 }
 #endif
-                
+
                 chunkCullingData.InstanceLodEnableds = chunkEntityLodEnabled;
                 hybridChunkInfoArray[entityIndex] = hybridChunkInfo;
             }
         }
     }
 
-    public struct BatchCullingState
-    {
-        public int OutputCount;
-    }
-
     [BurstCompile]
     unsafe struct ZeroVisibleCounts : IJobParallelFor
     {
         public NativeArray<BatchVisibility> Batches;
-        
+
         public void Execute(int index)
         {
             // Can't set individual fields of structs inside NativeArray, so do it via raw pointer
-            ((BatchVisibility*) Batches.GetUnsafePtr())[index].visibleCount = 0;
+            ((BatchVisibility*)Batches.GetUnsafePtr())[index].visibleCount = 0;
         }
     }
 
     [BurstCompile]
     unsafe struct SimpleCullingJob : IJobChunk
     {
-        [DeallocateOnJobCompletion] [ReadOnly] public NativeArray<FrustumPlanes.PlanePacket4> Planes;
-        [DeallocateOnJobCompletion] [NativeDisableParallelForRestriction] public NativeArray<BatchCullingState> BatchCullingStates;
+        [DeallocateOnJobCompletion][ReadOnly] public NativeArray<FrustumPlanes.PlanePacket4> Planes;
         [ReadOnly] public NativeArray<int> InternalToExternalRemappingTable;
 
         [ReadOnly] public ArchetypeChunkComponentType<WorldRenderBounds> BoundsComponent;
@@ -270,13 +254,11 @@ namespace Unity.Rendering
         [NativeDisableParallelForRestriction] public NativeArray<int> ThreadLocalIndexLists;
 
 #pragma warning disable 649
-        [NativeSetThreadIndex]
-        public int ThreadIndex;
+        [NativeSetThreadIndex] public int ThreadIndex;
 #pragma warning restore 649
-        
+
 #if UNITY_EDITOR
-        [NativeDisableUnsafePtrRestriction]
-        public CullingStats* Stats;
+        [NativeDisableUnsafePtrRestriction] public CullingStats* Stats;
 #endif
 
         public void Execute(ArchetypeChunk archetypeChunk, int chunkIndex, int firstEntityIndex)
@@ -325,9 +307,9 @@ namespace Unity.Rendering
 
                     var perInstanceCull = 0 != (chunkCullingData.Flags & HybridChunkCullingData.kFlagInstanceCulling);
 
-                    var chunkIn = perInstanceCull ?
-                        FrustumPlanes.Intersect2(Planes, chunkBounds.Value) :
-                        FrustumPlanes.Intersect2NoPartial(Planes, chunkBounds.Value);
+                    var chunkIn = perInstanceCull
+                        ? FrustumPlanes.Intersect2(Planes, chunkBounds.Value)
+                        : FrustumPlanes.Intersect2NoPartial(Planes, chunkBounds.Value);
 
                     if (chunkIn == FrustumPlanes.IntersectResult.Partial)
                     {
@@ -359,7 +341,10 @@ namespace Unity.Rendering
                                 // IndexList[batchOutputOffset + batchOutputCount] = processedInstanceCount + finalIndex;
                                 // Debug.Log($"DEBUGCULLING Partial {externalBatchIndex}: [{batchOutputOffset + batchOutputCount}] = {processedInstanceCount + finalIndex}");
 
-                                int advance = FrustumPlanes.Intersect2(Planes, chunkInstanceBounds[finalIndex].Value) != FrustumPlanes.IntersectResult.Out ? 1 : 0;
+                                int advance = FrustumPlanes.Intersect2(Planes, chunkInstanceBounds[finalIndex].Value) !=
+                                    FrustumPlanes.IntersectResult.Out
+                                    ? 1
+                                    : 0;
                                 instanceOutputOffset += advance;
 
                                 lodWord ^= 1ul << bitIndex;
@@ -400,7 +385,7 @@ namespace Unity.Rendering
 
                         // Since the chunk is fully in, we can easily count how many instances we will output
                         int chunkOutputCount = math.countbits(chunkEntityLodEnabled.Enabled[0]) +
-                                               math.countbits(chunkEntityLodEnabled.Enabled[1]);
+                            math.countbits(chunkEntityLodEnabled.Enabled[1]);
 
                         int chunkOutputOffset = System.Threading.Interlocked.Add(
                             ref pBatch->visibleCount, chunkOutputCount) - chunkOutputCount;
@@ -417,7 +402,8 @@ namespace Unity.Rendering
                             {
                                 var bitIndex = math.tzcnt(lodWord);
                                 var finalIndex = (j << 6) + bitIndex;
-                                IndexList[chunkOutputOffset + instanceOutputOffset] = processedInstanceCount + finalIndex;
+                                IndexList[chunkOutputOffset + instanceOutputOffset] =
+                                    processedInstanceCount + finalIndex;
                                 // Debug.Log($"DEBUGCULLING Full {externalBatchIndex} : [{batchOutputOffset + batchOutputCount}] = {processedInstanceCount + finalIndex}");
                                 instanceOutputOffset += 1;
                                 lodWord ^= 1ul << bitIndex;
@@ -431,5 +417,3 @@ namespace Unity.Rendering
         }
     }
 }
-
-#endif // ENABLE_HYBRID_RENDERER_V2

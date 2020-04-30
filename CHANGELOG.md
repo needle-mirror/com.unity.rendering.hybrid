@@ -1,5 +1,28 @@
 # Change log
 
+
+## [0.5.0] - 2020-04-24
+
+### Changed
+
+Changes that only affect *Hybrid Renderer V2*:
+* V2 now computes accurate AABBs for batches.
+* V2 now longer adds WorldToLocal component to renderable entities.
+
+Changes that affect both versions:
+* Updated dependencies of this package.
+
+### Deprecated
+
+* Deprecated `FrozenRenderSceneTagProxy` and `RenderMeshProxy`. Please use the GameObject-to-Entity conversion workflow instead.
+
+### Fixed
+
+* Improved precision of camera frustum plane calculation in FrustumPlanes.FromCamera.
+* Improved upload performance by uploading matrices as 4x3 instead of 4x4 as well as calculating inverses on the GPU
+* Fixed default color properties being in the wrong color space
+
+
 ## [0.4.2] - 2020-04-15
 
 ### Changes
@@ -7,7 +30,7 @@
 * Updated dependencies of this package.
 
 
-## [0.4.1] - 2020-04-09
+## [0.4.1] - 2020-04-08
 
 ### Added (Hybrid V2)
 

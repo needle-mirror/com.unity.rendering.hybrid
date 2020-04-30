@@ -20,7 +20,7 @@ namespace Unity.Rendering
             var sections = new List<SceneSection>();
             EntityManager.GetAllUniqueSharedComponentData(sections);
 
-            // @TODO: Perform full validation that all Low HLOD levels are in section 0 
+            // @TODO: Perform full validation that all Low HLOD levels are in section 0
             int hasStreamedLOD = 0;
             foreach (var section in sections)
             {
@@ -34,7 +34,7 @@ namespace Unity.Rendering
                 group.SetSharedComponentFilter(section);
                 EntityManager.AddSharedComponentData(group, new FrozenRenderSceneTag { SceneGUID = section.SceneGUID, SectionIndex = section.Section, HasStreamedLOD = hasStreamedLOD});
             }
-            
+
             group.ResetFilter();
         }
     }

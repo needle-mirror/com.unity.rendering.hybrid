@@ -1,4 +1,3 @@
-#if !ENABLE_HYBRID_RENDERER_V2
 // #define DISABLE_HYBRID_V1_2019_3_INSTANCE_DATA
 // #define DISABLE_HYBRID_V1_TIGHT_BOUNDS
 
@@ -75,11 +74,6 @@ using UnityEngine.Rendering;
  */
 namespace Unity.Rendering
 {
-    unsafe struct ChunkInstanceLodEnabled
-    {
-        public fixed ulong Enabled[2];
-    }
-
     internal struct LocalGroupKey : IEquatable<LocalGroupKey>
     {
         public int Value;
@@ -95,23 +89,99 @@ namespace Unity.Rendering
         }
     }
 
-    internal struct Fixed16CamDistance
+    [JobProducerType(typeof(JobNativeMultiHashMapVisitKeyMutableValue.JobNativeMultiHashMapVisitKeyMutableValueProducer<, ,>))]
+    public interface IJobNativeMultiHashMapVisitKeyMutableValue<TKey, TValue>
+        where TKey : struct, IEquatable<TKey>
+        where TValue : struct
     {
-        public const float kRes = 100.0f;
+        void ExecuteNext(TKey key, ref TValue value);
+    }
 
-        public static ushort FromFloatCeil(float f)
+    public static class JobNativeMultiHashMapVisitKeyMutableValue
+    {
+        internal struct JobNativeMultiHashMapVisitKeyMutableValueProducer<TJob, TKey, TValue>
+            where TJob : struct, IJobNativeMultiHashMapVisitKeyMutableValue<TKey, TValue>
+            where TKey : struct, IEquatable<TKey>
+            where TValue : struct
         {
-            return (ushort) math.clamp((int) math.ceil(f * kRes), 0, 0xffff);
+            [NativeDisableContainerSafetyRestriction]
+            internal NativeMultiHashMap<TKey, TValue> HashMap;
+            internal TJob JobData;
+
+            static IntPtr s_JobReflectionData;
+
+            internal static IntPtr Initialize()
+            {
+                if (s_JobReflectionData == IntPtr.Zero)
+                {
+                    s_JobReflectionData = JobsUtility.CreateJobReflectionData(typeof(JobNativeMultiHashMapVisitKeyMutableValueProducer<TJob, TKey, TValue>), typeof(TJob), JobType.ParallelFor, (ExecuteJobFunction)Execute);
+                }
+
+                return s_JobReflectionData;
+            }
+
+            internal delegate void ExecuteJobFunction(ref JobNativeMultiHashMapVisitKeyMutableValueProducer<TJob, TKey, TValue> producer, IntPtr additionalPtr, IntPtr bufferRangePatchData, ref JobRanges ranges, int jobIndex);
+
+            public static unsafe void Execute(ref JobNativeMultiHashMapVisitKeyMutableValueProducer<TJob, TKey, TValue> producer, IntPtr additionalPtr, IntPtr bufferRangePatchData, ref JobRanges ranges, int jobIndex)
+            {
+                while (true)
+                {
+                    int begin;
+                    int end;
+
+                    if (!JobsUtility.GetWorkStealingRange(ref ranges, jobIndex, out begin, out end))
+                    {
+                        return;
+                    }
+
+                    var bucketData = producer.HashMap.GetUnsafeBucketData();
+                    var buckets = (int*)bucketData.buckets;
+                    var nextPtrs = (int*)bucketData.next;
+                    var keys = bucketData.keys;
+                    var values = bucketData.values;
+
+                    for (int i = begin; i < end; i++)
+                    {
+                        int entryIndex = buckets[i];
+
+                        while (entryIndex != -1)
+                        {
+                            var key = UnsafeUtility.ReadArrayElement<TKey>(keys, entryIndex);
+
+                            producer.JobData.ExecuteNext(key, ref UnsafeUtilityEx.ArrayElementAsRef<TValue>(values, entryIndex));
+
+                            entryIndex = nextPtrs[entryIndex];
+                        }
+                    }
+                }
+            }
         }
 
-        public static ushort FromFloatFloor(float f)
+        public static unsafe JobHandle Schedule<TJob, TKey, TValue>(this TJob jobData, NativeMultiHashMap<TKey, TValue> hashMap, int minIndicesPerJobCount, JobHandle dependsOn = new JobHandle())
+            where TJob : struct, IJobNativeMultiHashMapVisitKeyMutableValue<TKey, TValue>
+            where TKey : struct, IEquatable<TKey>
+            where TValue : struct
         {
-            return (ushort) math.clamp((int) math.floor(f * kRes), 0, 0xffff);
+            var jobProducer = new JobNativeMultiHashMapVisitKeyMutableValueProducer<TJob, TKey, TValue>
+            {
+                HashMap = hashMap,
+                JobData = jobData
+            };
+
+            var scheduleParams = new JobsUtility.JobScheduleParameters(
+                UnsafeUtility.AddressOf(ref jobProducer)
+                , JobNativeMultiHashMapVisitKeyMutableValueProducer<TJob, TKey, TValue>.Initialize()
+                , dependsOn
+                , ScheduleMode.Batched
+            );
+
+            return JobsUtility.ScheduleParallelFor(ref scheduleParams, hashMap.GetUnsafeBucketData().bucketCapacityMask + 1, minIndicesPerJobCount);
         }
     }
 
+    // Prefix the name with "HybridV1" so it can coexist with Hybrid V2.
     [BurstCompile]
-    unsafe struct SelectLodEnabled : IJobNativeMultiHashMapVisitKeyMutableValue<LocalGroupKey, BatchChunkData>
+    unsafe struct HybridV1SelectLodEnabled : IJobNativeMultiHashMapVisitKeyMutableValue<LocalGroupKey, BatchChunkData>
     {
         [ReadOnly] public LODGroupExtensions.LODParams LODParams;
         [ReadOnly] public NativeArray<byte> ForceLowLOD;
@@ -122,12 +192,10 @@ namespace Unity.Rendering
         public bool DistanceScaleChanged;
 
 #if UNITY_EDITOR
-        [NativeDisableUnsafePtrRestriction]
-        public CullingStats* Stats;
+        [NativeDisableUnsafePtrRestriction] public CullingStats* Stats;
 
 #pragma warning disable 649
-        [NativeSetThreadIndex]
-        public int ThreadIndex;
+        [NativeSetThreadIndex] public int ThreadIndex;
 #pragma warning restore 649
 
 #endif
@@ -165,8 +233,8 @@ namespace Unity.Rendering
             }
             else
             {
-                int diff = (int) chunkData.MovementGraceFixed16 - CameraMoveDistanceFixed16;
-                chunkData.MovementGraceFixed16 = (ushort) math.max(0, diff);
+                int diff = (int)chunkData.MovementGraceFixed16 - CameraMoveDistanceFixed16;
+                chunkData.MovementGraceFixed16 = (ushort)math.max(0, diff);
 
                 var graceExpired = chunkData.MovementGraceFixed16 == 0;
                 var forceLodChanged = forceLowLOD != chunkData.ForceLowLODPrevious;
@@ -186,11 +254,15 @@ namespace Unity.Rendering
 
                     float graceDistance = float.MaxValue;
 
-                    for (int i = 0; i != chunkInstanceCount;i++)
+                    for (int i = 0; i != chunkInstanceCount; i++)
                     {
                         var rootLodRequirement = rootLodRequirements[i];
-                        
-                        var rootLodDistance = math.select(DistanceScale * math.length(LODParams.cameraPos - rootLodRequirement.LOD.WorldReferencePosition), DistanceScale, isOrtho);
+
+                        var rootLodDistance =
+                            math.select(
+                                DistanceScale *
+                                math.length(LODParams.cameraPos - rootLodRequirement.LOD.WorldReferencePosition),
+                                DistanceScale, isOrtho);
 
                         float rootMinDist = math.select(rootLodRequirement.LOD.MinDist, 0.0f, forceLowLOD == 1);
                         float rootMaxDist = rootLodRequirement.LOD.MaxDist;
@@ -203,13 +275,20 @@ namespace Unity.Rendering
                         if (rootLodIntersect)
                         {
                             var instanceLodRequirement = instanceLodRequirements[i];
-                            var instanceDistance = math.select(DistanceScale * math.length(LODParams.cameraPos - instanceLodRequirement.WorldReferencePosition), DistanceScale, isOrtho);
+                            var instanceDistance =
+                                math.select(
+                                    DistanceScale *
+                                    math.length(LODParams.cameraPos - instanceLodRequirement.WorldReferencePosition),
+                                    DistanceScale, isOrtho);
 
-                            var instanceLodIntersect = (instanceDistance < instanceLodRequirement.MaxDist) && (instanceDistance >= instanceLodRequirement.MinDist);
+                            var instanceLodIntersect = (instanceDistance < instanceLodRequirement.MaxDist) &&
+                                (instanceDistance >= instanceLodRequirement.MinDist);
 
-                            graceDistance = math.min(math.abs(instanceDistance - instanceLodRequirement.MinDist), graceDistance);
-                            graceDistance = math.min(math.abs(instanceDistance - instanceLodRequirement.MaxDist), graceDistance);
-                            
+                            graceDistance = math.min(math.abs(instanceDistance - instanceLodRequirement.MinDist),
+                                graceDistance);
+                            graceDistance = math.min(math.abs(instanceDistance - instanceLodRequirement.MaxDist),
+                                graceDistance);
+
                             if (instanceLodIntersect)
                             {
                                 var wordIndex = i >> 6;
@@ -229,7 +308,8 @@ namespace Unity.Rendering
 
 
 #if UNITY_EDITOR
-            if (oldEntityLodEnabled.Enabled[0] != chunkEntityLodEnabled.Enabled[0] || oldEntityLodEnabled.Enabled[1] != chunkEntityLodEnabled.Enabled[1])
+            if (oldEntityLodEnabled.Enabled[0] != chunkEntityLodEnabled.Enabled[0] ||
+                oldEntityLodEnabled.Enabled[1] != chunkEntityLodEnabled.Enabled[1])
             {
                 Stats[ThreadIndex].Stats[CullingStats.kLodChanged]++;
             }
@@ -243,11 +323,106 @@ namespace Unity.Rendering
         public int OutputCount;
     }
 
-    [BurstCompile]
-    unsafe struct SimpleCullingJob : IJobNativeMultiHashMapVisitKeyValue<LocalGroupKey, BatchChunkData>
+
+    [JobProducerType(typeof(JobNativeMultiHashMapVisitKeyValue.JobNativeMultiHashMapVisitKeyValueProducer<, ,>))]
+    public interface IJobNativeMultiHashMapVisitKeyValue<TKey, TValue>
+        where TKey : struct, IEquatable<TKey>
+        where TValue : struct
     {
-        [DeallocateOnJobCompletion] [ReadOnly] public NativeArray<FrustumPlanes.PlanePacket4> Planes;
-        [DeallocateOnJobCompletion] [NativeDisableParallelForRestriction] public NativeArray<BatchCullingState> BatchCullingStates;
+        void ExecuteNext(TKey key, TValue value);
+    }
+
+    public static class JobNativeMultiHashMapVisitKeyValue
+    {
+        internal struct JobNativeMultiHashMapVisitKeyValueProducer<TJob, TKey, TValue>
+            where TJob : struct, IJobNativeMultiHashMapVisitKeyValue<TKey, TValue>
+            where TKey : struct, IEquatable<TKey>
+            where TValue : struct
+        {
+            [ReadOnly] public NativeMultiHashMap<TKey, TValue> HashMap;
+            internal TJob JobData;
+
+            static IntPtr s_JobReflectionData;
+
+            internal static IntPtr Initialize()
+            {
+                if (s_JobReflectionData == IntPtr.Zero)
+                {
+                    s_JobReflectionData = JobsUtility.CreateJobReflectionData(typeof(JobNativeMultiHashMapVisitKeyValueProducer<TJob, TKey, TValue>), typeof(TJob), JobType.ParallelFor, (ExecuteJobFunction)Execute);
+                }
+
+                return s_JobReflectionData;
+            }
+
+            internal delegate void ExecuteJobFunction(ref JobNativeMultiHashMapVisitKeyValueProducer<TJob, TKey, TValue> producer, IntPtr additionalPtr, IntPtr bufferRangePatchData, ref JobRanges ranges, int jobIndex);
+
+            public static unsafe void Execute(ref JobNativeMultiHashMapVisitKeyValueProducer<TJob, TKey, TValue> producer, IntPtr additionalPtr, IntPtr bufferRangePatchData, ref JobRanges ranges, int jobIndex)
+            {
+                while (true)
+                {
+                    int begin;
+                    int end;
+
+                    if (!JobsUtility.GetWorkStealingRange(ref ranges, jobIndex, out begin, out end))
+                    {
+                        return;
+                    }
+
+                    var hashMapData = producer.HashMap.GetUnsafeBucketData();
+                    var buckets = (int*)hashMapData.buckets;
+                    var nextPtrs = (int*)hashMapData.next;
+                    var keys = hashMapData.keys;
+                    var values = hashMapData.values;
+
+                    for (int i = begin; i < end; i++)
+                    {
+                        int entryIndex = buckets[i];
+
+                        while (entryIndex != -1)
+                        {
+                            var key = UnsafeUtility.ReadArrayElement<TKey>(keys, entryIndex);
+                            var value = UnsafeUtility.ReadArrayElement<TValue>(values, entryIndex);
+
+                            producer.JobData.ExecuteNext(key, value);
+
+                            entryIndex = nextPtrs[entryIndex];
+                        }
+                    }
+                }
+            }
+        }
+
+        public static unsafe JobHandle Schedule<TJob, TKey, TValue>(this TJob jobData, NativeMultiHashMap<TKey, TValue> hashMap, int minIndicesPerJobCount, JobHandle dependsOn = new JobHandle())
+            where TJob : struct, IJobNativeMultiHashMapVisitKeyValue<TKey, TValue>
+            where TKey : struct, IEquatable<TKey>
+            where TValue : struct
+        {
+            var jobProducer = new JobNativeMultiHashMapVisitKeyValueProducer<TJob, TKey, TValue>
+            {
+                HashMap = hashMap,
+                JobData = jobData
+            };
+
+            var scheduleParams = new JobsUtility.JobScheduleParameters(
+                UnsafeUtility.AddressOf(ref jobProducer)
+                , JobNativeMultiHashMapVisitKeyValueProducer<TJob, TKey, TValue>.Initialize()
+                , dependsOn
+                , ScheduleMode.Batched
+            );
+
+            return JobsUtility.ScheduleParallelFor(ref scheduleParams, hashMap.GetUnsafeBucketData().bucketCapacityMask + 1, minIndicesPerJobCount);
+        }
+    }
+
+    // Prefix the name with "HybridV1" so it can coexist with Hybrid V2.
+    [BurstCompile]
+    unsafe struct HybridV1SimpleCullingJob : IJobNativeMultiHashMapVisitKeyValue<LocalGroupKey, BatchChunkData>
+    {
+        [DeallocateOnJobCompletion][ReadOnly] public NativeArray<FrustumPlanes.PlanePacket4> Planes;
+
+        [DeallocateOnJobCompletion][NativeDisableParallelForRestriction]
+        public NativeArray<BatchCullingState> BatchCullingStates;
+
         [ReadOnly] public NativeArray<int> InternalToExternalRemappingTable;
 
         [ReadOnly] public ArchetypeChunkComponentType<WorldRenderBounds> BoundsComponent;
@@ -256,12 +431,10 @@ namespace Unity.Rendering
         public NativeArray<BatchVisibility> Batches;
 
 #if UNITY_EDITOR
-        [NativeDisableUnsafePtrRestriction]
-        public CullingStats* Stats;
-        #pragma warning disable 649
-        [NativeSetThreadIndex]
-        public int ThreadIndex;
-        #pragma warning restore 649
+        [NativeDisableUnsafePtrRestriction] public CullingStats* Stats;
+#pragma warning disable 649
+        [NativeSetThreadIndex] public int ThreadIndex;
+#pragma warning restore 649
 #endif
 
         public void ExecuteNext(LocalGroupKey internalBatchIndex, BatchChunkData chunkData)
@@ -295,9 +468,9 @@ namespace Unity.Rendering
 
                 var perInstanceCull = 0 != (chunkData.Flags & BatchChunkData.kFlagInstanceCulling);
 
-                var chunkIn = perInstanceCull ?
-                    FrustumPlanes.Intersect2(Planes, chunkBounds.Value) :
-                    FrustumPlanes.Intersect2NoPartial(Planes, chunkBounds.Value);
+                var chunkIn = perInstanceCull
+                    ? FrustumPlanes.Intersect2(Planes, chunkBounds.Value)
+                    : FrustumPlanes.Intersect2NoPartial(Planes, chunkBounds.Value);
 
                 if (chunkIn == FrustumPlanes.IntersectResult.Partial)
                 {
@@ -319,7 +492,10 @@ namespace Unity.Rendering
 
                             IndexList[batchOutputOffset + batchOutputCount] = processedInstanceCount + finalIndex;
 
-                            int advance = FrustumPlanes.Intersect2(Planes, chunkInstanceBounds[finalIndex].Value) != FrustumPlanes.IntersectResult.Out ? 1 : 0;
+                            int advance = FrustumPlanes.Intersect2(Planes, chunkInstanceBounds[finalIndex].Value) !=
+                                FrustumPlanes.IntersectResult.Out
+                                ? 1
+                                : 0;
                             batchOutputCount += advance;
 
                             lodWord ^= 1ul << bitIndex;
@@ -369,16 +545,18 @@ namespace Unity.Rendering
     internal struct BatchChunkData
     {
         public const int kFlagHasLodData = 1 << 0;
+
         public const int kFlagInstanceCulling = 1 << 1;
-                                                               // size  // start - end offset
-        public short ChunkInstanceCount;                       //  2     0 - 2
-        public short BatchOffset;                              //  2     2 - 4
-        public ushort MovementGraceFixed16;                    //  2     4 - 6
-        public byte Flags;                                     //  1     6 - 7
-        public byte ForceLowLODPrevious;                       //  1     7 - 8
-        public ChunkWorldRenderBounds ChunkBounds;             // 24     8 - 32
-        public ChunkInstanceLodEnabled InstanceLodEnableds;    // 16     32 - 48
-        public ArchetypeChunk Chunk;                           //  8     48 - 64
+
+        // size  // start - end offset
+        public short ChunkInstanceCount; //  2     0 - 2
+        public short BatchOffset; //  2     2 - 4
+        public ushort MovementGraceFixed16; //  2     4 - 6
+        public byte Flags; //  1     6 - 7
+        public byte ForceLowLODPrevious; //  1     7 - 8
+        public ChunkWorldRenderBounds ChunkBounds; // 24     8 - 32
+        public ChunkInstanceLodEnabled InstanceLodEnableds; // 16     32 - 48
+        public ArchetypeChunk Chunk; //  32     48 - 80
     }
 
     public unsafe class InstancedRenderMeshBatchGroup
@@ -436,9 +614,11 @@ namespace Unity.Rendering
                     result.Stats[f] += s.Stats[f];
                 }
             }
+
             result.CameraMoveDistance = m_CamMoveDistance;
             return result;
         }
+
 #endif
 
         private bool m_ResetLod;
@@ -469,18 +649,24 @@ namespace Unity.Rendering
         Dictionary<int, string> m_MaterialPropertyOverriddenBy;
         MaterialPropertyPointer[] m_MaterialPropertyPointers;
 
-        public InstancedRenderMeshBatchGroup(EntityManager entityManager, ComponentSystemBase componentSystem, EntityQuery cullingJobDependencyGroup)
+        public InstancedRenderMeshBatchGroup(EntityManager entityManager, ComponentSystemBase componentSystem,
+                                             EntityQuery cullingJobDependencyGroup)
         {
             m_BatchRendererGroup = new BatchRendererGroup(this.OnPerformCulling);
             m_EntityManager = entityManager;
             m_ComponentSystem = componentSystem;
             m_CullingJobDependencyGroup = cullingJobDependencyGroup;
             m_BatchToChunkMap = new NativeMultiHashMap<LocalGroupKey, BatchChunkData>(32, Allocator.Persistent);
-            m_LocalIdPool = new NativeArray<int>(kMaxBatchCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-            m_Tags = new NativeArray<FrozenRenderSceneTag>(kMaxBatchCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-            m_ForceLowLOD = new NativeArray<byte>(kMaxBatchCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-            m_InternalToExternalIds = new NativeArray<int>(kMaxBatchCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-            m_ExternalToInternalIds = new NativeArray<int>(kMaxBatchCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            m_LocalIdPool = new NativeArray<int>(kMaxBatchCount, Allocator.Persistent,
+                NativeArrayOptions.UninitializedMemory);
+            m_Tags = new NativeArray<FrozenRenderSceneTag>(kMaxBatchCount, Allocator.Persistent,
+                NativeArrayOptions.UninitializedMemory);
+            m_ForceLowLOD = new NativeArray<byte>(kMaxBatchCount, Allocator.Persistent,
+                NativeArrayOptions.UninitializedMemory);
+            m_InternalToExternalIds = new NativeArray<int>(kMaxBatchCount, Allocator.Persistent,
+                NativeArrayOptions.UninitializedMemory);
+            m_ExternalToInternalIds = new NativeArray<int>(kMaxBatchCount, Allocator.Persistent,
+                NativeArrayOptions.UninitializedMemory);
             m_ResetLod = true;
             m_InternalBatchRange = 0;
             m_ExternalBatchCount = 0;
@@ -488,7 +674,8 @@ namespace Unity.Rendering
             m_RemoveBatchMarker = new ProfilerMarker("BatchRendererGroup.Remove");
 
 #if UNITY_EDITOR
-            m_CullingStats = (CullingStats*)UnsafeUtility.Malloc(JobsUtility.MaxJobThreadCount * sizeof(CullingStats), 64, Allocator.Persistent);
+            m_CullingStats = (CullingStats*)UnsafeUtility.Malloc(JobsUtility.MaxJobThreadCount * sizeof(CullingStats),
+                64, Allocator.Persistent);
 #endif
             m_MaterialPropertyBlocks = new List<MaterialPropertyBlock>();
 
@@ -499,43 +686,63 @@ namespace Unity.Rendering
             {
                 var type = typeInfo.Type;
                 if (typeof(IComponentData).IsAssignableFrom(type))
-                { 
+                {
                     var attributes = type.GetCustomAttributes(typeof(MaterialPropertyAttribute), false);
                     if (attributes.Length > 0)
-                    { 
+                    {
                         var format = ((MaterialPropertyAttribute)attributes[0]).Format;
                         int numFormatComponents = 1;
                         switch (format)
                         {
-                            case MaterialPropertyFormat.Float: numFormatComponents = 1; break;
-                            case MaterialPropertyFormat.Float2: numFormatComponents = 2; break;
-                            case MaterialPropertyFormat.Float3: numFormatComponents = 3; break;
-                            case MaterialPropertyFormat.Float4: numFormatComponents = 4; break;
-                            case MaterialPropertyFormat.Float2x4: numFormatComponents = 8; break;
-                            case MaterialPropertyFormat.Float4x4: numFormatComponents = 16; break;
+                            case MaterialPropertyFormat.Float:
+                                numFormatComponents = 1;
+                                break;
+                            case MaterialPropertyFormat.Float2:
+                                numFormatComponents = 2;
+                                break;
+                            case MaterialPropertyFormat.Float3:
+                                numFormatComponents = 3;
+                                break;
+                            case MaterialPropertyFormat.Float4:
+                                numFormatComponents = 4;
+                                break;
+                            case MaterialPropertyFormat.Float2x4:
+                                numFormatComponents = 8;
+                                break;
+                            case MaterialPropertyFormat.Float4x4:
+                                numFormatComponents = 16;
+                                break;
                         }
 
-                        string propertyName = ((MaterialPropertyAttribute) attributes[0]).Name;
+                        string propertyName = ((MaterialPropertyAttribute)attributes[0]).Name;
                         int nameID = Shader.PropertyToID(propertyName);
 
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
                         if (m_MaterialPropertyOverriddenBy.ContainsKey(nameID))
                         {
                             string overridingComponent = m_MaterialPropertyOverriddenBy[nameID];
-                            throw new InvalidOperationException($"Component \"{type.Name}\" cannot override material property \"{propertyName}\" because it has already been overridden by component \"{overridingComponent}\"");
+                            throw new InvalidOperationException(
+                                $"Component \"{type.Name}\" cannot override material property \"{propertyName}\" because it has already been overridden by component \"{overridingComponent}\"");
                         }
                         else
                         {
                             m_MaterialPropertyOverriddenBy[nameID] = type.Name;
                         }
-                        
+
                         if (UnsafeUtility.SizeOf(type) != numFormatComponents * sizeof(float))
                         {
-                            throw new InvalidOperationException($"Material property component {type} (size = {UnsafeUtility.SizeOf(type)}) cannot be reinterpreted as {numFormatComponents} floats (size = {numFormatComponents * sizeof(float)}). Sizes must match.");
+                            throw new InvalidOperationException(
+                                $"Material property component {type} (size = {UnsafeUtility.SizeOf(type)}) cannot be reinterpreted as {numFormatComponents} floats (size = {numFormatComponents * sizeof(float)}). Sizes must match.");
                         }
 #endif
 
-                        m_MaterialPropertyTypes.Add(new MaterialPropertyType { typeIndex = TypeManager.GetTypeIndex(type), nameId = nameID, nameIdArray = Shader.PropertyToID(((MaterialPropertyAttribute)attributes[0]).Name + "_Array"), format = format, numFormatComponents = numFormatComponents });
+                        m_MaterialPropertyTypes.Add(new MaterialPropertyType
+                        {
+                            typeIndex = TypeManager.GetTypeIndex(type), nameId = nameID,
+                            nameIdArray =
+                                Shader.PropertyToID(((MaterialPropertyAttribute)attributes[0]).Name + "_Array"),
+                            format = format, numFormatComponents = numFormatComponents
+                        });
                     }
                 }
             }
@@ -632,14 +839,15 @@ namespace Unity.Rendering
 
             var batchCount = cullingContext.batchVisibility.Length;
             if (batchCount == 0)
-                return new JobHandle();;
+                return new JobHandle();
+            ;
 
             var lodParams = LODGroupExtensions.CalculateLODParams(cullingContext.lodParameters);
 
             Profiler.BeginSample("OnPerformCulling");
 
             int cullingPlaneCount = cullingContext.cullingPlanes.Length;
-            int packetCount = (cullingPlaneCount + 3 )>> 2;
+            int packetCount = (cullingPlaneCount + 3) >> 2;
             var planes = FrustumPlanes.BuildSOAPlanePackets(cullingContext.cullingPlanes, Allocator.TempJob);
 
             bool singleThreaded = false;
@@ -650,7 +858,8 @@ namespace Unity.Rendering
             {
                 // Depend on all component ata we access + previous jobs since we are writing to a single
                 // m_ChunkInstanceLodEnableds array.
-                var lodJobDependency = JobHandle.CombineDependencies(m_CullingJobDependency, m_CullingJobDependencyGroup.GetDependency());
+                var lodJobDependency = JobHandle.CombineDependencies(m_CullingJobDependency,
+                    m_CullingJobDependencyGroup.GetDependency());
 
                 float cameraMoveDistance = math.length(m_PrevCameraPos - lodParams.cameraPos);
                 var lodDistanceScaleChanged = lodParams.distanceScale != m_PrevLodDistanceScale;
@@ -660,13 +869,14 @@ namespace Unity.Rendering
                 m_CamMoveDistance = cameraMoveDistance;
 #endif
 
-                var selectLodEnabledJob = new SelectLodEnabled
+                var selectLodEnabledJob = new HybridV1SelectLodEnabled
                 {
                     ForceLowLOD = m_ForceLowLOD,
                     LODParams = lodParams,
                     RootLodRequirements = m_ComponentSystem.GetArchetypeChunkComponentType<RootLodRequirement>(true),
                     InstanceLodRequirements = m_ComponentSystem.GetArchetypeChunkComponentType<LodRequirement>(true),
-                    CameraMoveDistanceFixed16 = Fixed16CamDistance.FromFloatCeil(cameraMoveDistance * lodParams.distanceScale),
+                    CameraMoveDistanceFixed16 =
+                        Fixed16CamDistance.FromFloatCeil(cameraMoveDistance * lodParams.distanceScale),
                     DistanceScale = lodParams.distanceScale,
                     DistanceScaleChanged = lodDistanceScaleChanged,
 #if UNITY_EDITOR
@@ -674,7 +884,8 @@ namespace Unity.Rendering
 #endif
                 };
 
-                cullingDependency = m_LODDependency = selectLodEnabledJob.Schedule(m_BatchToChunkMap, singleThreaded ? 150000 : m_BatchToChunkMap.Capacity / 64, lodJobDependency);
+                cullingDependency = m_LODDependency = selectLodEnabledJob.Schedule(m_BatchToChunkMap,
+                    singleThreaded ? 150000 : m_BatchToChunkMap.Capacity / 64, lodJobDependency);
 
                 m_PrevLODParams = lodParams;
                 m_PrevLodDistanceScale = lodParams.distanceScale;
@@ -687,12 +898,14 @@ namespace Unity.Rendering
             else
             {
                 // Depend on all component ata we access + previous m_LODDependency job
-                cullingDependency = JobHandle.CombineDependencies(m_LODDependency, m_CullingJobDependencyGroup.GetDependency());
+                cullingDependency =
+                    JobHandle.CombineDependencies(m_LODDependency, m_CullingJobDependencyGroup.GetDependency());
             }
 
-            var batchCullingStates = new NativeArray<BatchCullingState>(m_InternalBatchRange, Allocator.TempJob, NativeArrayOptions.ClearMemory);
+            var batchCullingStates = new NativeArray<BatchCullingState>(m_InternalBatchRange, Allocator.TempJob,
+                NativeArrayOptions.ClearMemory);
 
-            var simpleCullingJob = new SimpleCullingJob
+            var simpleCullingJob = new HybridV1SimpleCullingJob
             {
                 Planes = planes,
                 BatchCullingStates = batchCullingStates,
@@ -705,7 +918,8 @@ namespace Unity.Rendering
 #endif
             };
 
-            var simpleCullingJobHandle = simpleCullingJob.Schedule(m_BatchToChunkMap, singleThreaded ? 150000 : 1024, cullingDependency);
+            var simpleCullingJobHandle =
+                simpleCullingJob.Schedule(m_BatchToChunkMap, singleThreaded ? 150000 : 1024, cullingDependency);
 
             DidScheduleCullingJob(simpleCullingJobHandle);
 
@@ -715,15 +929,17 @@ namespace Unity.Rendering
 
         public void BeginBatchGroup()
         {
-
         }
 
-        public unsafe void AddBatch(FrozenRenderSceneTag tag, int rendererSharedComponentIndex, int batchInstanceCount, NativeArray<ArchetypeChunk> chunks, NativeArray<int> sortedChunkIndices, int startSortedIndex, int chunkCount, bool flippedWinding, EditorRenderData data)
+        public unsafe void AddBatch(FrozenRenderSceneTag tag, int rendererSharedComponentIndex, int batchInstanceCount,
+            NativeArray<ArchetypeChunk> chunks, NativeArray<int> sortedChunkIndices, int startSortedIndex,
+            int chunkCount, bool flippedWinding, EditorRenderData data)
         {
             // Create the batch with extremely large placeholder bounds at first
             var bigBounds = new Bounds(new Vector3(0, 0, 0), new Vector3(1048576.0f, 1048576.0f, 1048576.0f));
 
-            var rendererSharedComponent = m_EntityManager.GetSharedComponentData<RenderMesh>(rendererSharedComponentIndex);
+            var rendererSharedComponent =
+                m_EntityManager.GetSharedComponentData<RenderMesh>(rendererSharedComponentIndex);
             var mesh = rendererSharedComponent.mesh;
             var material = rendererSharedComponent.material;
             var castShadows = rendererSharedComponent.castShadows;
@@ -735,17 +951,19 @@ namespace Unity.Rendering
             {
                 return;
             }
-            
+
             Profiler.BeginSample("AddBatch");
-            int externalBatchIndex = m_BatchRendererGroup.AddBatch(mesh, subMeshIndex, material, layer, castShadows, receiveShadows, flippedWinding, bigBounds, batchInstanceCount, null, data.PickableObject, data.SceneCullingMask);
+            int externalBatchIndex = m_BatchRendererGroup.AddBatch(mesh, subMeshIndex, material, layer, castShadows,
+                receiveShadows, flippedWinding, bigBounds, batchInstanceCount, null, data.PickableObject,
+                data.SceneCullingMask);
 
             if (externalBatchIndex > m_MaterialPropertyBlocks.Count - 1)
                 m_MaterialPropertyBlocks.Add(new MaterialPropertyBlock());
-            
+
             var propertyBlock = m_MaterialPropertyBlocks[externalBatchIndex];
             m_BatchRendererGroup.SetInstancingData(externalBatchIndex, batchInstanceCount, propertyBlock);
 
-            var matrices = (float4x4*) m_BatchRendererGroup.GetBatchMatrices(externalBatchIndex).GetUnsafePtr();
+            var matrices = (float4x4*)m_BatchRendererGroup.GetBatchMatrices(externalBatchIndex).GetUnsafePtr();
             Profiler.EndSample();
 
             int internalBatchIndex = AllocLocalId();
@@ -765,7 +983,7 @@ namespace Unity.Rendering
             int numShaderMaterialProperties = 0;
 #if !DISABLE_HYBRID_V1_2019_3_INSTANCE_DATA
             // This code was added in 2019.3. It is a big performance regression compared to original Megacity Hybrid Renderer. Added a define in 2020.1 to allow developers to disable it if they don't need it.
-            // Hybrid Renderer V2 adds this feature among other features and is a major performance uplift. Define ENABLE_HYBRID_RENDERER_V2 in your project properties to enable it. You need SRP 8.
+            // Hybrid Renderer V2 adds this feature among other features and is a major performance uplift. Define ENABLE_HYBRID_RENDERER_V2 in your project properties to enable it. You need SRP 9.
 
             for (int i = 0; i < numProperties; ++i)
             {
@@ -773,7 +991,7 @@ namespace Unity.Rendering
                 if (((uint)flags & (uint)ShaderPropertyFlags.HideInInspector) == 0)
                 {
                     //var nameId = Shader.PropertyToID(shader.GetPropertyName(i));      // This causes GCAlloc
-                    var nameId = shader.GetPropertyNameId(i);                           // New C++ API (landed 3 hours later)
+                    var nameId = shader.GetPropertyNameId(i); // New C++ API (landed 3 hours later)
 
                     int materialPropertyIndex = 0;
                     for (; materialPropertyIndex < m_MaterialPropertyTypes.Count; ++materialPropertyIndex)
@@ -789,40 +1007,51 @@ namespace Unity.Rendering
                         switch (m_MaterialPropertyTypes[materialPropertyIndex].format)
                         {
                             case MaterialPropertyFormat.Float:
-                                {
-                                    var arr1 = m_BatchRendererGroup.GetBatchScalarArray(externalBatchIndex, m_MaterialPropertyTypes[materialPropertyIndex].nameIdArray);
-                                    nativePtr = (float*)arr1.GetUnsafePtr();
-                                    var defaultValue = material.GetFloat(m_MaterialPropertyTypes[materialPropertyIndex].nameId);
-                                    UnsafeUtility.MemCpyReplicate(nativePtr, &defaultValue, UnsafeUtility.SizeOf<float>(), batchInstanceCount); // TODO: Reuse batches to avoid default initialization every frame.
-                                }
-                                break;
+                            {
+                                var arr1 = m_BatchRendererGroup.GetBatchScalarArray(externalBatchIndex,
+                                    m_MaterialPropertyTypes[materialPropertyIndex].nameIdArray);
+                                nativePtr = (float*)arr1.GetUnsafePtr();
+                                var defaultValue =
+                                    material.GetFloat(m_MaterialPropertyTypes[materialPropertyIndex].nameId);
+                                UnsafeUtility.MemCpyReplicate(nativePtr, &defaultValue, UnsafeUtility.SizeOf<float>(),
+                                    batchInstanceCount); // TODO: Reuse batches to avoid default initialization every frame.
+                            }
+                            break;
 
                             // float2 and float3 are packed into float4s in cbuffer arrays, and are handled as such
                             case MaterialPropertyFormat.Float2:
                             case MaterialPropertyFormat.Float3:
                             case MaterialPropertyFormat.Float4:
-                                {
-                                    var arr4 = m_BatchRendererGroup.GetBatchVectorArray(externalBatchIndex, m_MaterialPropertyTypes[materialPropertyIndex].nameIdArray);
-                                    nativePtr = (float*)arr4.GetUnsafePtr();
-                                    var defaultValue = material.GetVector(m_MaterialPropertyTypes[materialPropertyIndex].nameId);
-                                    UnsafeUtility.MemCpyReplicate(nativePtr, &defaultValue, UnsafeUtility.SizeOf<float4>(), batchInstanceCount); // TODO: Reuse batches to avoid default initialization every frame.
-                                }
-                                break;
+                            {
+                                var arr4 = m_BatchRendererGroup.GetBatchVectorArray(externalBatchIndex,
+                                    m_MaterialPropertyTypes[materialPropertyIndex].nameIdArray);
+                                nativePtr = (float*)arr4.GetUnsafePtr();
+                                var defaultValue =
+                                    material.GetVector(m_MaterialPropertyTypes[materialPropertyIndex].nameId);
+                                UnsafeUtility.MemCpyReplicate(nativePtr, &defaultValue, UnsafeUtility.SizeOf<float4>(),
+                                    batchInstanceCount); // TODO: Reuse batches to avoid default initialization every frame.
+                            }
+                            break;
 
                             case MaterialPropertyFormat.Float4x4:
-                                {
-                                    var arr4x4 = m_BatchRendererGroup.GetBatchMatrixArray(externalBatchIndex, m_MaterialPropertyTypes[materialPropertyIndex].nameIdArray);
-                                    nativePtr = (float*)arr4x4.GetUnsafePtr();
-                                    var defaultValue = material.GetMatrix(m_MaterialPropertyTypes[materialPropertyIndex].nameId);
-                                    UnsafeUtility.MemCpyReplicate(nativePtr, &defaultValue, UnsafeUtility.SizeOf<float4x4>(), batchInstanceCount); // TODO: Reuse batches to avoid default initialization every frame.
-                                }
-                                break;
+                            {
+                                var arr4x4 = m_BatchRendererGroup.GetBatchMatrixArray(externalBatchIndex,
+                                    m_MaterialPropertyTypes[materialPropertyIndex].nameIdArray);
+                                nativePtr = (float*)arr4x4.GetUnsafePtr();
+                                var defaultValue =
+                                    material.GetMatrix(m_MaterialPropertyTypes[materialPropertyIndex].nameId);
+                                UnsafeUtility.MemCpyReplicate(nativePtr, &defaultValue,
+                                    UnsafeUtility.SizeOf<float4x4>(),
+                                    batchInstanceCount); // TODO: Reuse batches to avoid default initialization every frame.
+                            }
+                            break;
                         }
 
-                        m_MaterialPropertyPointers[numShaderMaterialProperties++] = new MaterialPropertyPointer 
-                        { 
+                        m_MaterialPropertyPointers[numShaderMaterialProperties++] = new MaterialPropertyPointer
+                        {
                             ptr = nativePtr,
-                            type = m_ComponentSystem.GetArchetypeChunkComponentTypeDynamic(ComponentType.ReadOnly(m_MaterialPropertyTypes[materialPropertyIndex].typeIndex)),
+                            type = m_ComponentSystem.GetArchetypeChunkComponentTypeDynamic(
+                                ComponentType.ReadOnly(m_MaterialPropertyTypes[materialPropertyIndex].typeIndex)),
                             numFormatComponents = m_MaterialPropertyTypes[materialPropertyIndex].numFormatComponents
                         };
                     }
@@ -833,7 +1062,8 @@ namespace Unity.Rendering
             int runningOffset = 0;
             var previousArchetype = new EntityArchetype();
             int numActiveArchetypeMaterialProperties = 0;
-            var archetypeActiveMaterialProperties = new NativeArray<int>(kMaxArchetypeProperties, Allocator.Temp, NativeArrayOptions.UninitializedMemory);
+            var archetypeActiveMaterialProperties = new NativeArray<int>(kMaxArchetypeProperties, Allocator.Temp,
+                NativeArrayOptions.UninitializedMemory);
 
             MinMaxAABB batchAABB = default;
 
@@ -842,32 +1072,33 @@ namespace Unity.Rendering
                 var chunk = chunks[sortedChunkIndices[startSortedIndex + i]];
                 var bounds = chunk.GetChunkComponentData(boundsType);
 
-                var localKey = new LocalGroupKey { Value = internalBatchIndex };
+                var localKey = new LocalGroupKey {Value = internalBatchIndex};
                 var hasLodData = chunk.Has(rootLodRequirements) && chunk.Has(instanceLodRequirements);
                 var hasPerInstanceCulling = !hasLodData || chunk.Has(perInstanceCullingTag);
 
-                #if !DISABLE_HYBRID_V1_TIGHT_BOUNDS
+#if !DISABLE_HYBRID_V1_TIGHT_BOUNDS
                 if (i == 0)
-                    batchAABB = (MinMaxAABB) bounds.Value;
+                    batchAABB = (MinMaxAABB)bounds.Value;
                 else
                     batchAABB.Encapsulate(bounds.Value);
-                #endif
+#endif
 
                 Assert.IsTrue(chunk.Count <= 128);
 
                 m_BatchToChunkMap.Add(localKey, new BatchChunkData
                 {
                     Chunk = chunk,
-                    Flags = (byte) ((hasLodData ? BatchChunkData.kFlagHasLodData : 0) | (hasPerInstanceCulling ? BatchChunkData.kFlagInstanceCulling : 0)),
+                    Flags = (byte)((hasLodData ? BatchChunkData.kFlagHasLodData : 0) |
+                        (hasPerInstanceCulling ? BatchChunkData.kFlagInstanceCulling : 0)),
                     ChunkBounds = bounds,
-                    ChunkInstanceCount = (short) chunk.Count,
-                    BatchOffset = (short) runningOffset,
+                    ChunkInstanceCount = (short)chunk.Count,
+                    BatchOffset = (short)runningOffset,
                     InstanceLodEnableds = default
                 });
 
                 var matrixSizeOf = UnsafeUtility.SizeOf<float4x4>();
                 var localToWorld = chunk.GetNativeArray(localToWorldType);
-                float4x4* srcMatrices = (float4x4*) localToWorld.GetUnsafeReadOnlyPtr();
+                float4x4* srcMatrices = (float4x4*)localToWorld.GetUnsafeReadOnlyPtr();
 
                 UnsafeUtility.MemCpy(matrices, srcMatrices, matrixSizeOf * chunk.Count);
 
@@ -891,17 +1122,21 @@ namespace Unity.Rendering
                         }
                     }
                 }
-               
+
                 // Memcpy all material property instance data in [MaterialProperty] types to C++ side arrays
                 for (int j = 0; j < numActiveArchetypeMaterialProperties; j++)
                 {
                     var componentIndex = archetypeActiveMaterialProperties[j];
-                    var componentSize = UnsafeUtility.SizeOf<float>() * m_MaterialPropertyPointers[componentIndex].numFormatComponents;
-                    var chunkData = chunk.GetDynamicComponentDataArrayReinterpret<float>(m_MaterialPropertyPointers[componentIndex].type, componentSize);
+                    var componentSize = UnsafeUtility.SizeOf<float>() *
+                        m_MaterialPropertyPointers[componentIndex].numFormatComponents;
+                    var chunkData =
+                        chunk.GetDynamicComponentDataArrayReinterpret<float>(
+                            m_MaterialPropertyPointers[componentIndex].type, componentSize);
                     Debug.Assert(chunkData.Length > 0);
 
                     float* srcData = (float*)chunkData.GetUnsafeReadOnlyPtr();
-                    float* dstData = m_MaterialPropertyPointers[componentIndex].ptr + runningOffset * m_MaterialPropertyPointers[componentIndex].numFormatComponents;
+                    float* dstData = m_MaterialPropertyPointers[componentIndex].ptr +
+                        runningOffset * m_MaterialPropertyPointers[componentIndex].numFormatComponents;
                     int copySize = chunk.Count * componentSize;
 
                     UnsafeUtility.MemCpy(dstData, srcData, copySize);
@@ -911,11 +1146,11 @@ namespace Unity.Rendering
                 runningOffset += chunk.Count;
             }
 
-            #if !DISABLE_HYBRID_V1_TIGHT_BOUNDS
+#if !DISABLE_HYBRID_V1_TIGHT_BOUNDS
             // Now we know the accurate AABB of all chunks that belong to this batch.
             // Update the render node with it, so things that rely on it (like built-in
             // shadow cascades) don't produce unnecessarily bad results.
-            var batchBounds = (AABB) batchAABB;
+            var batchBounds = (AABB)batchAABB;
             var batchCenter = batchBounds.Center;
             var batchSize = batchBounds.Size;
             m_BatchRendererGroup.SetBatchBounds(
@@ -923,19 +1158,19 @@ namespace Unity.Rendering
                 new Bounds(
                     new Vector3(batchCenter.x, batchCenter.y, batchCenter.z),
                     new Vector3(batchSize.x, batchSize.y, batchSize.z)));
-            #endif
+#endif
 
             archetypeActiveMaterialProperties.Dispose();
 
             m_Tags[internalBatchIndex] = tag;
-            m_ForceLowLOD[internalBatchIndex] = (byte) ((tag.SectionIndex == 0 && tag.HasStreamedLOD != 0) ? 1 : 0);
+            m_ForceLowLOD[internalBatchIndex] = (byte)((tag.SectionIndex == 0 && tag.HasStreamedLOD != 0) ? 1 : 0);
 
             m_InternalBatchRange = math.max(m_InternalBatchRange, internalBatchIndex + 1);
             m_ExternalBatchCount = externalBatchIndex + 1;
 
             SanityCheck();
         }
-        
+
         private void SanityCheck()
         {
 #if false
@@ -1010,7 +1245,8 @@ namespace Unity.Rendering
 #endif
         }
 
-        public void EndBatchGroup(FrozenRenderSceneTag tag, NativeArray<ArchetypeChunk> chunks, NativeArray<int> sortedChunkIndices)
+        public void EndBatchGroup(FrozenRenderSceneTag tag, NativeArray<ArchetypeChunk> chunks,
+            NativeArray<int> sortedChunkIndices)
         {
             // Disable force low lod  based on loading a streaming zone
             if (tag.SectionIndex > 0 && tag.HasStreamedLOD != 0)
@@ -1041,7 +1277,7 @@ namespace Unity.Rendering
 
             Profiler.BeginSample("RemoveTag");
             // Remove any tag that need to go
-            for (int i = m_InternalBatchRange-1; i >= 0; i--)
+            for (int i = m_InternalBatchRange - 1; i >= 0; i--)
             {
                 var shouldRemove = m_Tags[i].Equals(tag);
                 if (!shouldRemove)
@@ -1076,7 +1312,7 @@ namespace Unity.Rendering
 
                 m_Tags[i] = default(FrozenRenderSceneTag);
 
-                var localKey = new LocalGroupKey { Value = i };
+                var localKey = new LocalGroupKey {Value = i};
                 m_BatchToChunkMap.Remove(localKey);
 
                 m_ExternalBatchCount--;
@@ -1093,7 +1329,6 @@ namespace Unity.Rendering
             m_CullingJobDependencyGroup.CompleteDependency();
         }
 
-
         void DidScheduleCullingJob(JobHandle job)
         {
             m_CullingJobDependency = JobHandle.CombineDependencies(job, m_CullingJobDependency);
@@ -1101,5 +1336,3 @@ namespace Unity.Rendering
         }
     }
 }
-
-#endif // !ENABLE_HYBRID_RENDERER_V2

@@ -9,6 +9,5 @@ namespace Unity.Rendering
     [ExecuteAlways]
     public class UpdatePresentationSystemGroup : ComponentSystemGroup
     {
-        
     }
 }

@@ -1,9 +1,10 @@
-﻿using Unity.Entities;
+using Unity.Entities;
 using Unity.Rendering;
 using UnityEngine;
 
 [ConverterVersion("joe", 1)]
 [UpdateInGroup(typeof(GameObjectAfterConversionGroup))]
+[WorldSystemFilter(WorldSystemFilterFlags.HybridGameObjectConversion)]
 class HLODGroupSectionSplitConversion : GameObjectConversionSystem
 {
     void RecursivelySetSection(Transform transform, SceneSection section)
@@ -11,7 +12,7 @@ class HLODGroupSectionSplitConversion : GameObjectConversionSystem
         foreach (var entity in GetEntities(transform.gameObject))
             DstEntityManager.SetSharedComponentData(entity, section);
 
-        for (int i = 0;i != transform.childCount;i++)
+        for (int i = 0; i != transform.childCount; i++)
             RecursivelySetSection(transform.GetChild(i), section);
     }
 

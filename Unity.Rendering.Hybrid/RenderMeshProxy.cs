@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using Unity.Entities;
 using Unity.Mathematics;
 using Unity.Transforms;
@@ -109,6 +109,7 @@ namespace Unity.Rendering
     }
 
     [AddComponentMenu("DOTS/Deprecated/RenderMeshProxy-Deprecated")]
+    [Obsolete("RenderMeshProxy has been deprecated. Please use the new GameObject-to-entity conversion workflows instead. (RemovedAfter 2020-07-03).")]
     public class RenderMeshProxy : SharedComponentDataProxy<RenderMesh>
     {
         internal override void UpdateComponentData(EntityManager manager, Entity entity)

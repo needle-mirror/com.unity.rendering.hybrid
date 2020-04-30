@@ -28,6 +28,7 @@ namespace Unity.Rendering
     }
 
     [UnityEngine.AddComponentMenu("")]
+    [Obsolete("FrozenRenderSceneTagProxy has been deprecated. Please use the new GameObject-to-entity conversion workflows instead. (RemovedAfter 2020-07-03).")]
     public class FrozenRenderSceneTagProxy : SharedComponentDataProxy<FrozenRenderSceneTag>
     {
     }

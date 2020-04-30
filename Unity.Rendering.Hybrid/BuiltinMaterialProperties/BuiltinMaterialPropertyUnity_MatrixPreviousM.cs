@@ -1,9 +1,15 @@
-﻿using Unity.Entities;
+using Unity.Entities;
 using Unity.Mathematics;
 
-#if ENABLE_HYBRID_RENDERER_V2 && UNITY_2020_1_OR_NEWER && (HDRP_9_0_0_OR_NEWER || URP_9_0_0_OR_NEWER)
 namespace Unity.Rendering
 {
-    [MaterialProperty("unity_MatrixPreviousM"         , MaterialPropertyFormat.Float4x4)] public struct BuiltinMaterialPropertyUnity_MatrixPreviousM          : IComponentData { public float4x4 Value; }
-}
+    // Previous matrix components always exist, to prevent compilation errors,
+    // but they become material properties only when V2 is enabled
+#if ENABLE_HYBRID_RENDERER_V2
+    [MaterialProperty("unity_MatrixPreviousM", MaterialPropertyFormat.Float4x4)]
 #endif
+    public struct BuiltinMaterialPropertyUnity_MatrixPreviousM : IComponentData
+    {
+        public float4x4 Value;
+    }
+}

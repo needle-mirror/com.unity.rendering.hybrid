@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
@@ -80,7 +80,7 @@ namespace Unity.Rendering.Tests
             var allocator = new HeapAllocator(HeapSize);
             var blocks = Enumerable.Range(0, NumBlocks).Select(x => new HeapBlock()).ToArray();
 
-            // Stress test the allocator by doing a bunch of random allocs and deallocs and 
+            // Stress test the allocator by doing a bunch of random allocs and deallocs and
             // try to verify that allocator internal asserts don't fire, and free space behaves
             // as expected.
 
@@ -247,7 +247,7 @@ namespace Unity.Rendering.Tests
                     blocks[b] = new HeapBlock();
                 }
             }
-            
+
             allocator.Dispose();
         }
     }

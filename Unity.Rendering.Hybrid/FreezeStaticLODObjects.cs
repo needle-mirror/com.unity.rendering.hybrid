@@ -16,8 +16,8 @@ namespace Unity.Rendering
                     Any = new ComponentType[] { typeof(ActiveLODGroupMask), typeof(MeshLODGroupComponent), typeof(HLODComponent), typeof(MeshLODComponent) },
                     All = new ComponentType[] { typeof(Static) }
                 });
-            
-            EntityManager.RemoveComponent(group, new ComponentTypes (typeof(ActiveLODGroupMask), typeof(MeshLODGroupComponent), typeof(HLODComponent), typeof(MeshLODComponent)));
+
+            EntityManager.RemoveComponent(group, new ComponentTypes(typeof(ActiveLODGroupMask), typeof(MeshLODGroupComponent), typeof(HLODComponent), typeof(MeshLODComponent)));
         }
     }
 }

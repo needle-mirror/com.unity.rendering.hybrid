@@ -15,7 +15,7 @@ namespace Unity.Rendering
                 {
                     All = new ComponentType[] { typeof(RenderBounds), typeof(Static) }
                 });
-            
+
             EntityManager.RemoveComponent(group, new ComponentTypes (typeof(RenderBounds)));
         }
     }

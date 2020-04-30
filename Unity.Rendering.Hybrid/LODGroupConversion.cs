@@ -1,4 +1,4 @@
-﻿using Unity.Entities;
+using Unity.Entities;
 using Unity.Mathematics;
 using Unity.Rendering;
 using UnityEngine;
@@ -6,8 +6,9 @@ using UnityEngine;
 [UpdateAfter(typeof(MeshRendererConversion))]
 [UpdateAfter(typeof(SkinnedMeshRendererConversion))]
 [ConverterVersion("joe", 1)]
+[WorldSystemFilter(WorldSystemFilterFlags.HybridGameObjectConversion)]
 class LODGroupConversion : GameObjectConversionSystem
-{    
+{
     protected override void OnUpdate()
     {
         Entities.ForEach((LODGroup lodGroup) =>
@@ -85,5 +86,4 @@ class LODGroupConversion : GameObjectConversionSystem
             }
         });
     }
-
 }

@@ -1,4 +1,4 @@
-﻿// #define DEBUG_ASSERTS
+// #define DEBUG_ASSERTS
 
 using UnityEngine;
 using UnityEngine.Assertions;
@@ -9,7 +9,6 @@ using Unity.Collections.LowLevel.Unsafe;
 
 namespace Unity.Rendering
 {
-
     [System.Diagnostics.DebuggerDisplay("({begin}, {end}), Length = {Length}")]
     public struct HeapBlock : IComparable<HeapBlock>, IEquatable<HeapBlock>
     {
@@ -61,17 +60,17 @@ namespace Unity.Rendering
         public bool Empty { get { return m_Free == m_Size; } }
         public bool Full { get { return m_Free == 0; } }
         public bool IsCreated { get { return m_IsCreated; } }
-        
+
         public void Clear()
         {
             var size = m_Size;
-            
+
             m_SizeBins.Clear();
             m_Blocks.Clear();
             m_FreeEndpoints.Clear();
             m_Size = 0;
             m_Free = 0;
-            
+
             Resize(size);
         }
 
@@ -79,7 +78,7 @@ namespace Unity.Rendering
         {
             if (!IsCreated)
                 return;
-            
+
             for (int i = 0; i < m_Blocks.Length; ++i)
                 m_Blocks[i].Dispose();
 
@@ -296,7 +295,7 @@ namespace Unity.Rendering
             int lo = 0;                 // Low endpoint of search, inclusive
             int hi = m_SizeBins.Length; // High endpoint of search, exclusive
 
-            for (; ;)
+            for (;;)
             {
                 int d2 = (hi - lo) / 2;
 
@@ -498,4 +497,3 @@ namespace Unity.Rendering
         }
     }
 }
-

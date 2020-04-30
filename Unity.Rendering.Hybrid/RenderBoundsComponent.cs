@@ -1,4 +1,4 @@
-﻿using Unity.Entities;
+using Unity.Entities;
 using Unity.Mathematics;
 
 namespace Unity.Rendering
@@ -12,7 +12,7 @@ namespace Unity.Rendering
     {
         public AABB Value;
     }
-    
+
     public struct ChunkWorldRenderBounds : IComponentData
     {
         public AABB Value;

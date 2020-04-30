@@ -1,10 +1,11 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using Unity.Entities;
 using UnityEngine;
 
 namespace Unity.Rendering
 {
     [ConverterVersion("joe", 1)]
+    [WorldSystemFilter(WorldSystemFilterFlags.HybridGameObjectConversion)]
     class SkinnedMeshRendererConversion : GameObjectConversionSystem
     {
         protected override void OnUpdate()

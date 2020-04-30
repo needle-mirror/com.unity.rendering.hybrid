@@ -18,13 +18,16 @@ namespace Unity.Rendering
     [AttributeUsage(AttributeTargets.Struct, AllowMultiple = true)]
     public class MaterialPropertyAttribute : Attribute
     {
-        public MaterialPropertyAttribute(string materialPropertyName, MaterialPropertyFormat format)
+        public MaterialPropertyAttribute(string materialPropertyName, MaterialPropertyFormat format, int overrideSize = -1)
         {
             Name = materialPropertyName;
             Format = format;
+            OverrideSize = overrideSize;
         }
 
         public string Name { get; }
         public MaterialPropertyFormat Format { get; }
+
+        public int OverrideSize { get; }
     }
 }

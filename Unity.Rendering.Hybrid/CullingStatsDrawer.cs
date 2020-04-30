@@ -1,4 +1,4 @@
-﻿#if USE_BATCH_RENDERER_GROUP
+#if USE_BATCH_RENDERER_GROUP
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -23,14 +23,15 @@ namespace Unity.Rendering
                 m_Enabled = !m_Enabled;
             }
         }
+
         private unsafe void OnGUI()
         {
             if (m_Enabled)
             {
-#if ENABLE_HYBRID_RENDERER_V2 && UNITY_2020_1_OR_NEWER && (HDRP_9_0_0_OR_NEWER || URP_9_0_0_OR_NEWER)
-                var sys = World.Active.GetExistingSystem<HybridRendererSystem>();
+#if ENABLE_HYBRID_RENDERER_V2
+                var sys = World.DefaultGameObjectInjectionWorld.GetExistingSystem<HybridRendererSystem>();
 #else
-                var sys = World.Active.GetExistingSystem<RenderMeshSystemV2>();
+                var sys = World.DefaultGameObjectInjectionWorld.GetExistingSystem<RenderMeshSystemV2>();
 #endif
 
                 var stats = sys.ComputeCullingStats();

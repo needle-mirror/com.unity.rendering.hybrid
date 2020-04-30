@@ -1,4 +1,4 @@
-﻿using Unity.Burst;
+using Unity.Burst;
 using Unity.Collections;
 using Unity.Entities;
 using Unity.Jobs;
@@ -8,7 +8,7 @@ using UnityEngine;
 
 namespace Unity.Rendering
 {
-    public struct PerInstanceCullingTag : IComponentData { }
+    public struct PerInstanceCullingTag : IComponentData {}
 
     struct RootLodRequirement : IComponentData
     {
@@ -126,7 +126,7 @@ namespace Unity.Rendering
             public ArchetypeChunkComponentType<RootLodRequirement>              RootLodRequirement;
 
             public void Execute(ArchetypeChunk chunk, int chunkIndex, int firstEntityIndex)
-            {                    
+            {
                 var lodRequirement = chunk.GetNativeArray(LodRequirement);
                 var rootLodRequirement = chunk.GetNativeArray(RootLodRequirement);
                 var meshLods = chunk.GetNativeArray(MeshLODComponent);
@@ -142,7 +142,7 @@ namespace Unity.Rendering
                     // Cannot take LocalToWorld from the instances, because they might not all share the same pivot
                     lodRequirement[i] = new LodRequirement(lodGroup, LocalToWorldLookup[lodGroupEntity], lodMask);
                 }
-                
+
                 for (int i = 0; i < instanceCount; i++)
                 {
                     var meshLod = meshLods[i];
@@ -150,7 +150,7 @@ namespace Unity.Rendering
                     var lodGroup = MeshLODGroupComponent[lodGroupEntity];
                     var parentMask = lodGroup.ParentMask;
                     var parentGroupEntity = lodGroup.ParentGroup;
-                    
+
                     RootLodRequirement rootLod;
 
                     if (parentGroupEntity == Entity.Null)
@@ -182,7 +182,7 @@ namespace Unity.Rendering
         {
             //@TODO: Updating of LodRequirement & RootLodRequirement has to be push based,
             //       Otherwise how do we quickly early out when nothing has changed.
-            
+
             var updateLodJob = new UpdateLodRequirementsJob
             {
                 MeshLODGroupComponent = GetComponentDataFromEntity<MeshLODGroupComponent>(true),

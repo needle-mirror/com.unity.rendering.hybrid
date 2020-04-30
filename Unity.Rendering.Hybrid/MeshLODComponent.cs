@@ -1,4 +1,4 @@
-﻿using Unity.Entities;
+using Unity.Entities;
 using Unity.Mathematics;
 
 namespace Unity.Rendering
@@ -12,18 +12,18 @@ namespace Unity.Rendering
     {
         public Entity    ParentGroup;
         public int       ParentMask;
-        
+
         public float4    LODDistances0;
         public float4    LODDistances1;
 
         public float3    LocalReferencePoint;
     }
-    
+
 
     public struct HLODComponent : IComponentData
     {
     }
-    
+
     public struct MeshLODComponent : IComponentData
     {
         public Entity   Group;

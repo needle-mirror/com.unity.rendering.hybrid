@@ -16,7 +16,8 @@
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner",
         "Unity.RenderPipelines.HighDefinition.Runtime",
-        "Unity.RenderPipelines.Universal.Runtime"
+        "Unity.RenderPipelines.Universal.Runtime",
+        "Unity.RenderPipelines.Core.Runtime"
     ],
     "includePlatforms": [
         "Editor"
@@ -34,6 +35,21 @@
     "versionDefines": [
         {
             "name": "com.unity.render-pipelines.high-definition",
+            "expression": "6.9.9",
+            "define": "HDRP_7_0_0_OR_NEWER"
+        },
+        {
+            "name": "com.unity.render-pipelines.universal",
+            "expression": "6.9.9",
+            "define": "URP_7_0_0_OR_NEWER"
+        },
+        {
+            "name": "com.unity.render-pipelines.core",
+            "expression": "6.9.9",
+            "define": "SRP_7_0_0_OR_NEWER"
+        },
+        {
+            "name": "com.unity.render-pipelines.high-definition",
             "expression": "8.9.9",
             "define": "HDRP_9_0_0_OR_NEWER"
         },
@@ -41,6 +57,11 @@
             "name": "com.unity.render-pipelines.universal",
             "expression": "8.9.9",
             "define": "URP_9_0_0_OR_NEWER"
+        },
+        {
+            "name": "com.unity.render-pipelines.core",
+            "expression": "8.9.9",
+            "define": "SRP_9_0_0_OR_NEWER"
         },
         {
             "name": "com.unity.tiny",

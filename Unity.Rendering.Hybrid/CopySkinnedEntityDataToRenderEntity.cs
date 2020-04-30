@@ -1,4 +1,4 @@
-﻿using Unity.Collections;
+using Unity.Collections;
 using Unity.Entities;
 using Unity.Jobs;
 using Unity.Burst;
@@ -10,7 +10,7 @@ namespace Unity.Rendering
     /// Copies the BoneIndexOffsets on the skinned entities to the index offsets material properties of the skinned mesh entities.
     /// </summary>
     [UpdateInGroup(typeof(PresentationSystemGroup))]
-#if ENABLE_HYBRID_RENDERER_V2 && UNITY_2020_1_OR_NEWER && (HDRP_9_0_0_OR_NEWER || URP_9_0_0_OR_NEWER)
+#if ENABLE_HYBRID_RENDERER_V2
     [UpdateBefore(typeof(HybridRendererSystem))]
 #else
     [UpdateBefore(typeof(RenderMeshSystemV2))]

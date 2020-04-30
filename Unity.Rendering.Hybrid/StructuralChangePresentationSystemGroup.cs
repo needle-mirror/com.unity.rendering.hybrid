@@ -8,6 +8,5 @@ namespace Unity.Rendering
     [ExecuteAlways]
     public class StructuralChangePresentationSystemGroup : ComponentSystemGroup
     {
-        
     }
 }

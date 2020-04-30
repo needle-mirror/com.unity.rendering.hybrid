@@ -1,53 +1,50 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using Unity.Transforms;
 using Unity.Entities;
 using Unity.Mathematics;
 using Unity.Profiling;
 using UnityEngine;
+using UnityEngine.Rendering;
 using UnityEngine.VFX;
-#if HDRP_9_0_0_OR_NEWER
+#if HDRP_7_0_0_OR_NEWER
 using UnityEngine.Rendering.HighDefinition;
+#endif
+#if URP_7_0_0_OR_NEWER
+using UnityEngine.Rendering.Universal;
 #endif
 
 namespace Unity.Rendering
 {
 #if !TINY_0_22_0_OR_NEWER
+    [WorldSystemFilter(WorldSystemFilterFlags.HybridGameObjectConversion)]
     public class LightConversionSystem : GameObjectConversionSystem
     {
         protected override void OnUpdate()
         {
+#if HDRP_7_0_0_OR_NEWER || !HDRP_7_0_0_OR_NEWER
             Entities.ForEach((Light light) =>
             {
                 AddHybridComponent(light);
             });
-        }
-    }
-    
-#if HDRP_9_0_0_OR_NEWER
-    // these cause crash if enabled
-    /*public class HDAdditionalLightDataConversionSystem : GameObjectConversionSystem
-    {
-        protected override void OnUpdate()
-        {
+#endif
+
+#if HDRP_7_0_0_OR_NEWER
             Entities.ForEach((HDAdditionalLightData light) =>
             {
                 AddHybridComponent(light);
             });
-        }
-    }*/
 #endif
 
-    public class LightProbeGroupConversionSystem : GameObjectConversionSystem
-    {
-        protected override void OnUpdate()
-        {
-            Entities.ForEach((LightProbeGroup group) =>
+#if URP_7_0_0_OR_NEWER
+            Entities.ForEach((UniversalAdditionalLightData vfx) =>
             {
-                AddHybridComponent(group);
+                AddHybridComponent(vfx);
             });
+#endif
         }
     }
-    
+
+    [WorldSystemFilter(WorldSystemFilterFlags.HybridGameObjectConversion)]
     public class LightProbeProxyVolumeConversionSystem : GameObjectConversionSystem
     {
         protected override void OnUpdate()
@@ -58,7 +55,8 @@ namespace Unity.Rendering
             });
         }
     }
-   
+
+    [WorldSystemFilter(WorldSystemFilterFlags.HybridGameObjectConversion)]
     public class ReflectionProbeConversionSystem : GameObjectConversionSystem
     {
         protected override void OnUpdate()
@@ -67,24 +65,18 @@ namespace Unity.Rendering
             {
                 AddHybridComponent(probe);
             });
+
+#if HDRP_7_0_0_OR_NEWER
+            Entities.ForEach((HDAdditionalReflectionData reflectionData) =>
+            {
+                AddHybridComponent(reflectionData);
+            });
+#endif
         }
     }
 
-#if HDRP_9_0_0_OR_NEWER
-    // these cause crash if enabled
-    /*public class PlanarReflectionProbeConversionSystem : GameObjectConversionSystem
-    {
-        protected override void OnUpdate()
-        {
-            
-            Entities.ForEach((PlanarReflectionProbe probe) =>
-            {
-                AddHybridComponent(probe);
-            });
-        }
-    }*/
-#endif
-
+#if HYBRID_ENTITIES_CAMERA_CONVERSION
+    [WorldSystemFilter(WorldSystemFilterFlags.HybridGameObjectConversion)]
     public class CameraConversionSystem : GameObjectConversionSystem
     {
         protected override void OnUpdate()
@@ -93,20 +85,38 @@ namespace Unity.Rendering
             {
                 AddHybridComponent(camera);
             });
+
+#if HDRP_7_0_0_OR_NEWER
+            Entities.ForEach((HDAdditionalCameraData data) =>
+            {
+                AddHybridComponent(data);
+            });
+#endif
+
+#if URP_7_0_0_OR_NEWER
+            Entities.ForEach((UniversalAdditionalCameraData data) =>
+            {
+                AddHybridComponent(data);
+            });
+#endif
         }
     }
-    
+#endif
+
+    [WorldSystemFilter(WorldSystemFilterFlags.HybridGameObjectConversion)]
     public class TextMeshConversionSystem : GameObjectConversionSystem
     {
         protected override void OnUpdate()
         {
-            Entities.ForEach((TextMesh mesh) =>
+            Entities.ForEach((TextMesh mesh, MeshRenderer renderer) =>
             {
                 AddHybridComponent(mesh);
+                AddHybridComponent(renderer);
             });
         }
     }
-    
+
+    [WorldSystemFilter(WorldSystemFilterFlags.HybridGameObjectConversion)]
     public class SpriteRendererConversionSystem : GameObjectConversionSystem
     {
         protected override void OnUpdate()
@@ -117,7 +127,8 @@ namespace Unity.Rendering
             });
         }
     }
-    
+
+    [WorldSystemFilter(WorldSystemFilterFlags.HybridGameObjectConversion)]
     public class VisualEffectConversionSystem : GameObjectConversionSystem
     {
         protected override void OnUpdate()
@@ -128,16 +139,59 @@ namespace Unity.Rendering
             });
         }
     }
-    
-    public class ParticleSystemConversionSystem : GameObjectConversionSystem
+
+#if HDRP_7_0_0_OR_NEWER
+    [WorldSystemFilter(WorldSystemFilterFlags.HybridGameObjectConversion)]
+    public class DecalProjectorConversionSystem : GameObjectConversionSystem
     {
         protected override void OnUpdate()
         {
-            Entities.ForEach((ParticleSystem particleSystem) =>
+            Entities.ForEach((DecalProjector projector) =>
             {
-                AddHybridComponent(particleSystem);
+                AddHybridComponent(projector);
             });
         }
     }
+#endif
+
+#if HDRP_7_0_0_OR_NEWER
+    [WorldSystemFilter(WorldSystemFilterFlags.HybridGameObjectConversion)]
+    public class DensityVolumeConversionSystem : GameObjectConversionSystem
+    {
+        protected override void OnUpdate()
+        {
+            Entities.ForEach((DensityVolume volume) =>
+            {
+                AddHybridComponent(volume);
+            });
+        }
+    }
+
+    [WorldSystemFilter(WorldSystemFilterFlags.HybridGameObjectConversion)]
+    public class PlanarReflectionProbeConversionSystem : GameObjectConversionSystem
+    {
+        protected override void OnUpdate()
+        {
+            Entities.ForEach((PlanarReflectionProbe probe) =>
+            {
+                AddHybridComponent(probe);
+            });
+        }
+    }
+#endif
+
+#if SRP_7_0_0_OR_NEWER
+    [WorldSystemFilter(WorldSystemFilterFlags.HybridGameObjectConversion)]
+    public class VolumeConversionSystem : GameObjectConversionSystem
+    {
+        protected override void OnUpdate()
+        {
+            Entities.ForEach((Volume volume) =>
+            {
+                AddHybridComponent(volume);
+            });
+        }
+    }
+#endif
 #endif
 }
