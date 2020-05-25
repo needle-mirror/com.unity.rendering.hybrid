@@ -1,5 +1,12 @@
 # Change log
 
+## [0.5.1] - 2020-05-25
+
+### Changed
+
+* Updated dependencies of this package.
+* Updated minimum Unity Editor version to 2019.3.12f1 (84b23722532d)
+
 
 ## [0.5.0] - 2020-04-24
 

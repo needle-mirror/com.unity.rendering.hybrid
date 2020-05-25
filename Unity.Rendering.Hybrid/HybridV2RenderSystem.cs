@@ -5,6 +5,7 @@
 // #define DEBUG_LOG_BATCHES
 // #define DEBUG_LOG_BATCH_UPDATES
 // #define DEBUG_LOG_CHUNKS
+// #define DEBUG_LOG_INVALID_CHUNKS
 // #define DEBUG_LOG_UPLOADS
 // #define DEBUG_LOG_PROPERTIES
 // #define DEBUG_LOG_OVERRIDES
@@ -61,11 +62,8 @@ namespace Unity.Rendering
 
         // Begin and end indices for component type metadata (modification version numbers, typeIndex values) in external arrays.
         public int ChunkTypesBegin;
-
         public int ChunkTypesEnd;
 
-        // TODO: Remove this once GetComponentVersion responds to entity deletion
-        public int PrevCount;
         public HybridChunkCullingData CullingData;
         public bool Valid;
     }
@@ -169,6 +167,36 @@ namespace Unity.Rendering
                 currentValue = prevValue;
             }
         }
+    }
+
+    public struct MaterialPropertyDefaultValue
+    {
+        public readonly float4x4 Value;
+        public readonly bool Nonzero;
+
+        public MaterialPropertyDefaultValue(float f)
+        {
+            Value = default;
+            Value[0] = f;
+            Nonzero = f != 0;
+        }
+
+        public MaterialPropertyDefaultValue(float4 v)
+        {
+            Value = default;
+            Value.c0 = v;
+            Nonzero = !v.Equals(float4.zero);
+        }
+
+        public MaterialPropertyDefaultValue(float4x4 m)
+        {
+            Value = m;
+            Nonzero = !m.Equals(float4x4.zero);
+        }
+
+        public static implicit operator MaterialPropertyDefaultValue(float v) => new MaterialPropertyDefaultValue(v);
+        public static implicit operator MaterialPropertyDefaultValue(float4 v) => new MaterialPropertyDefaultValue(v);
+        public static implicit operator MaterialPropertyDefaultValue(float4x4 v) => new MaterialPropertyDefaultValue(v);
     }
 
     [BurstCompile]
@@ -298,9 +326,7 @@ namespace Unity.Rendering
             int internalIndex = chunkInfo.InternalIndex;
             UpdateBatchAABB(internalIndex, chunkAABB);
 
-            // TODO: Remove entityCountChanged once GetComponentVersion responds to entity deletion
-            bool entityCountChanged = chunkInfo.PrevCount != chunk.Count;
-            chunkInfo.PrevCount = chunk.Count;
+            bool structuralChanges = chunk.DidOrderChange(LastSystemVersion);
 
             var dstOffsetWorldToLocal = -1;
             var dstOffsetPrevWorldToLocal = -1;
@@ -331,7 +357,7 @@ namespace Unity.Rendering
                     var skipComponent = (isWorldToLocal || isPrevWorldToLocal);
 
                     bool componentChanged = chunk.DidChange(type, LastSystemVersion);
-                    bool copyComponentData = (isNewChunk || entityCountChanged || componentChanged) && !skipComponent;
+                    bool copyComponentData = (isNewChunk || structuralChanges || componentChanged) && !skipComponent;
 
                     if (copyComponentData)
                     {
@@ -848,7 +874,6 @@ namespace Unity.Rendering
 
         private EntityQuery m_MetaEntitiesForHybridRenderableChunks;
 
-        private NativeList<ChunkComponentCopyDescriptor> m_ChunkComponentCopyDescriptors;
         private NativeList<DefaultValueBlitDescriptor> m_DefaultValueBlits;
 
         private JobHandle m_AABBsCleared;
@@ -894,12 +919,14 @@ namespace Unity.Rendering
         {
             public int TypeIndex;
             public int SizeBytes;
+            public bool OverriddenDefault;
         };
 
         struct PropertyMapping
         {
             public string Name;
             public int Size;
+            public MaterialPropertyDefaultValue DefaultValue;
         }
 
         NativeMultiHashMap<int, MaterialPropertyType> m_MaterialPropertyTypes;
@@ -908,6 +935,7 @@ namespace Unity.Rendering
         // and from type indices to type names.
         Dictionary<int, string> m_MaterialPropertyNames;
         Dictionary<int, string> m_MaterialPropertyTypeNames;
+        Dictionary<int, float4x4> m_MaterialPropertyDefaultValues;
         static Dictionary<Type, PropertyMapping> s_TypeToPropertyMappings = new Dictionary<Type, PropertyMapping>();
 
         private bool m_FirstFrameAfterInit;
@@ -977,8 +1005,25 @@ namespace Unity.Rendering
 
             public int Compare(ArchetypeChunk x, ArchetypeChunk y)
             {
-                var hx = BatchCreateInfoFactory.CreateInfoForChunk(x).GetHashCode();
-                var hy = BatchCreateInfoFactory.CreateInfoForChunk(y).GetHashCode();
+                var ix = BatchCreateInfoFactory.CreateInfoForChunk(x);
+                var iy = BatchCreateInfoFactory.CreateInfoForChunk(y);
+
+                bool vx = ix.Valid;
+                bool vy = iy.Valid;
+
+                // Always sort invalid chunks last, so they can be skipped by shortening the array.
+                if (!vx || !vy)
+                {
+                    if (vx)
+                        return -1;
+                    else if (vy)
+                        return 1;
+                    else
+                        return 0;
+                }
+
+                var hx = ix.GetHashCode();
+                var hy = iy.GetHashCode();
 
                 if (hx < hy)
                     return -1;
@@ -1126,7 +1171,6 @@ namespace Unity.Rendering
 
             m_BatchAABBs = new NativeArray<float>(kMaxBatchCount * (int)HybridChunkUpdater.kFloatsPerAABB, Allocator.Persistent);
 
-            m_ChunkComponentCopyDescriptors = new NativeList<ChunkComponentCopyDescriptor>(Allocator.Persistent);
             m_DefaultValueBlits = new NativeList<DefaultValueBlitDescriptor>(Allocator.Persistent);
 
             m_AABBsCleared = new JobHandle();
@@ -1165,10 +1209,19 @@ namespace Unity.Rendering
             m_MaterialPropertyTypes = new NativeMultiHashMap<int, MaterialPropertyType>(256, Allocator.Persistent);
             m_MaterialPropertyNames = new Dictionary<int, string>();
             m_MaterialPropertyTypeNames = new Dictionary<int, string>();
+            m_MaterialPropertyDefaultValues = new Dictionary<int, float4x4>();
 
             // Some hardcoded mappings to avoid dependencies to Hybrid from DOTS
             RegisterMaterialPropertyType<LocalToWorld>("unity_ObjectToWorld");
-            RegisterMaterialPropertyType<WorldToLocal_Tag>("unity_WorldToObject", 4 * 4 * 4);
+            RegisterMaterialPropertyType<WorldToLocal_Tag>("unity_WorldToObject", overrideTypeSize: 4 * 4 * 4);
+
+            // Ifdef guard registering types that might not exist if V2 is disabled.
+#if ENABLE_HYBRID_RENDERER_V2
+            // Explicitly use a default of all ones for probe occlusion, so stuff doesn't render as black if this isn't set.
+            RegisterMaterialPropertyType<BuiltinMaterialPropertyUnity_ProbesOcclusion>(
+                "unity_ProbesOcclusion",
+                defaultValue: new float4(1, 1, 1, 1));
+#endif
 
             foreach (var typeInfo in TypeManager.AllTypes)
             {
@@ -1193,7 +1246,7 @@ namespace Unity.Rendering
             m_FirstFrameAfterInit = true;
         }
 
-        public static void RegisterMaterialPropertyType(Type type, string propertyName, int overrideTypeSize = -1)
+        public static void RegisterMaterialPropertyType(Type type, string propertyName, int overrideTypeSize = -1, MaterialPropertyDefaultValue defaultValue = default)
         {
             Debug.Assert(type != null, "type must be non-null");
             Debug.Assert(!string.IsNullOrEmpty(propertyName), "Property name must be valid");
@@ -1205,24 +1258,31 @@ namespace Unity.Rendering
             // Several types can override one property, but not the other way around.
             // If necessary, this restriction can be lifted in the future.
             if (s_TypeToPropertyMappings.ContainsKey(type))
-                Debug.Assert(s_TypeToPropertyMappings[type].Equals(propertyName), $"Attempted to register same type with multiple different property names {propertyName}");
+            {
+                Debug.Assert(s_TypeToPropertyMappings[type].Equals(propertyName),
+                    "Attempted to register same type with multiple different property names");
+            }
             else
             {
                 var pm = new PropertyMapping();
                 pm.Name = propertyName;
                 pm.Size = overrideTypeSize;
+                pm.DefaultValue = defaultValue;
                 s_TypeToPropertyMappings[type] = pm;
             }
         }
 
-        public static void RegisterMaterialPropertyType<T>(string propertyName, int overrideTypeSize = -1)
+        public static void RegisterMaterialPropertyType<T>(string propertyName, int overrideTypeSize = -1, MaterialPropertyDefaultValue defaultValue = default)
             where T : IComponentData
         {
-            RegisterMaterialPropertyType(typeof(T), propertyName, overrideTypeSize);
+            RegisterMaterialPropertyType(typeof(T), propertyName, overrideTypeSize, defaultValue);
         }
 
         private void InitializeMaterialProperties()
         {
+            m_MaterialPropertyTypes.Clear();
+            m_MaterialPropertyDefaultValues.Clear();
+
             foreach (var kv in s_TypeToPropertyMappings)
             {
                 Type type = kv.Key;
@@ -1231,13 +1291,18 @@ namespace Unity.Rendering
                 int sizeBytes = kv.Value.Size;
                 int typeIndex = TypeManager.GetTypeIndex(type);
                 int nameID = Shader.PropertyToID(propertyName);
+                var defaultValue = kv.Value.DefaultValue;
 
                 m_MaterialPropertyTypes.Add(nameID,
                     new MaterialPropertyType
                     {
                         TypeIndex = typeIndex,
                         SizeBytes = sizeBytes,
+                        OverriddenDefault = defaultValue.Nonzero,
                     });
+
+                if (defaultValue.Nonzero)
+                    m_MaterialPropertyDefaultValues[typeIndex] = defaultValue.Value;
 
 #if USE_PROPERTY_ASSERTS
                 m_MaterialPropertyNames[nameID] = propertyName;
@@ -1467,7 +1532,6 @@ namespace Unity.Rendering
             m_BatchMotionInfos.Dispose();
             m_ChunkProperties.Dispose();
             m_ExistingBatchInternalIndices.Dispose();
-            m_ChunkComponentCopyDescriptors.Dispose();
             m_DefaultValueBlits.Dispose();
             m_ComponentTypeCache.Dispose();
 
@@ -1615,7 +1679,6 @@ namespace Unity.Rendering
         public JobHandle UpdateAllBatches(JobHandle inputDependencies)
         {
             m_DefaultValueBlits.Clear();
-            m_ChunkComponentCopyDescriptors.Clear();
 
             Profiler.BeginSample("GetComponentTypes");
             var hybridRenderedChunkType =
@@ -1715,7 +1778,7 @@ namespace Unity.Rendering
             if (numNewChunks > 0)
             {
                 Profiler.BeginSample("AddNewChunks");
-                AddNewChunks(newChunks.GetSubArray(0, numNewChunks));
+                int numValidNewChunks = AddNewChunks(newChunks.GetSubArray(0, numNewChunks));
                 Profiler.EndSample();
 
                 // Must make a new array so the arrays are valid and don't alias.
@@ -1730,7 +1793,12 @@ namespace Unity.Rendering
                     HybridChunkUpdater = hybridChunkUpdater,
                 };
 
-                hybridCompleted = updateNewChunksJob.Schedule(numNewChunks, kNumNewChunksPerThread);
+#if DEBUG_LOG_INVALID_CHUNKS
+                if (numValidNewChunks != numNewChunks)
+                    Debug.Log($"Tried to add {numNewChunks} new chunks, but only {numValidNewChunks} were valid, {numNewChunks - numValidNewChunks} were invalid");
+#endif
+
+                hybridCompleted = updateNewChunksJob.Schedule(numValidNewChunks, kNumNewChunksPerThread);
                 hybridChunkUpdater.NewChunks.Dispose(hybridCompleted);
             }
 
@@ -1769,62 +1837,6 @@ namespace Unity.Rendering
             batchHadMovingEntities.Dispose();
 
             return hybridCompleted;
-        }
-
-        private void UploadAllDirtyChunks()
-        {
-#if DEBUG_LOG_TOP_LEVEL
-            if (m_ChunkComponentCopyDescriptors.Length > 0)
-                Debug.Log($"UploadAllDirtyChunks(dirtyChunks: {m_ChunkComponentCopyDescriptors.Length})");
-#endif
-
-            // TODO: Implement this with Burst once possible
-            for (int i = 0; i < m_ChunkComponentCopyDescriptors.Length; ++i)
-            {
-                var copy = m_ChunkComponentCopyDescriptors[i];
-                m_ThreadedGPUUploader.AddUpload(
-                    copy.SourcePtr,
-                    copy.SizeBytes,
-                    copy.DestinationOffset
-                );
-
-#if DEBUG_LOG_UPLOADS
-                LogUpload(
-                    copy.SourcePtr,
-                    copy.SizeBytes,
-                    copy.DestinationOffset
-                );
-                Debug.Log($"Dirty chunk, size: {copy.SizeBytes}, offset: {copy.DestinationOffset}");
-#endif
-            }
-
-            m_ChunkComponentCopyDescriptors.Clear();
-        }
-
-        internal static void LogUpload(void* src, int size, int destination)
-        {
-#if DEBUG_LOG_UPLOADS
-            byte* p = (byte*)src;
-            uint h = XXHash.Hash32(p, size);
-            bool allZeroes = true;
-            for (int i = 0; i < size; ++i)
-            {
-                if (p[i] != 0)
-                {
-                    allZeroes = false;
-                    break;
-                }
-            }
-            int end = destination + size;
-
-            float* f = (float*)src;
-            int numFloats = size / sizeof(float);
-            string contents = Enumerable.Range(0, numFloats)
-                .Select(i => f[i])
-                .Aggregate("", (s, x) => $"{s}{x}, ");
-
-            Debug.Log($"UPLOADER Upload {(ulong)src:x16} {size} ({destination} = 0x{destination:x8}, {end} = 0x{end:x8}), h: {h:x8}, zeroes: {allZeroes}, contents: {contents}");
-#endif
         }
 
         private int GarbageCollectUnreferencedBatches(NativeArray<long> unreferencedInternalIndices)
@@ -2014,57 +2026,10 @@ namespace Unity.Rendering
             batchInfo.Dispose();
         }
 
-        private void UpdateChunk(
-            NativeArray<long> unreferencedInternalIndices,
-            ref HybridChunkInfo chunkInfo, ArchetypeChunk chunk,
-            bool isNewChunk)
+        private int AddNewChunks(NativeArray<ArchetypeChunk> newChunks)
         {
-            int internalIndex = chunkInfo.InternalIndex;
+            int numValidNewChunks = 0;
 
-            if (!isNewChunk)
-            {
-                // Mark chunk as "not unreferenced", so referenced.
-                AtomicHelpers.IndexToQwIndexAndMask(internalIndex, out int qw, out long mask);
-                unreferencedInternalIndices[qw] &= ~mask;
-            }
-
-#if DEBUG_LOG_CHUNKS
-            Debug.Log($"UpdateChunk(internalBatchIndex: {internalIndex}, externalBatchIndex: {m_InternalToExternalIds[internalIndex]}, chunk: {chunk.Count})");
-#endif
-
-            bool entityCountChanged = chunkInfo.PrevCount != chunk.Count;
-            chunkInfo.PrevCount = chunk.Count;
-
-            for (int i = chunkInfo.ChunkTypesBegin; i < chunkInfo.ChunkTypesEnd; ++i)
-            {
-                var chunkProperty = m_ChunkProperties[i];
-                var type = m_ComponentTypeCache.Type(chunkProperty.ComponentTypeIndex);
-
-                bool componentChanged = chunk.DidChange(type, LastSystemVersion);
-                bool copyComponentData = isNewChunk || entityCountChanged || componentChanged;
-
-                if (copyComponentData)
-                {
-                    // Stash the raw pointer for the actual copy. This is only legal as long as the pointer
-                    // is not used after structural changes can have happened. We are only using it during
-                    // update so it should be fine.
-                    var src = chunk.GetDynamicComponentDataArrayReinterpret<int>(type, chunkProperty.ValueSizeBytes);
-                    m_ChunkComponentCopyDescriptors.Add(new ChunkComponentCopyDescriptor
-                    {
-                        SourcePtr = src.GetUnsafeReadOnlyPtr(),
-                        DestinationOffset = chunkProperty.GPUDataBegin,
-                        SizeBytes = (int)((uint)chunk.Count * (uint)chunkProperty.ValueSizeBytes),
-                    });
-
-#if DEBUG_LOG_PROPERTIES
-                    Debug.Log($"UpdateChunkProperty(internalBatchIndex: {internalIndex}, externalBatchIndex: {m_InternalToExternalIds[internalIndex]} chunk: {chunk.Count}, property: {i}, type: {type}, prevChangeVersion: {chunkProperty->PrevChangeVersion}, componentVersion: {componentVersion})");
-#endif
-                }
-            }
-        }
-
-        private void AddNewChunks(NativeArray<ArchetypeChunk> newChunks)
-        {
             Debug.Assert(newChunks.Length > 0, "Attempted to add new chunks, but list of new chunks was empty");
 
             var hybridChunkInfoType = GetArchetypeChunkComponentType<HybridChunkInfo>();
@@ -2087,6 +2052,7 @@ namespace Unity.Rendering
             {
                 BatchCreateInfoFactory = batchCreateInfoFactory
             };
+            // This also sorts invalid chunks to the back.
             newChunks.Sort(sortByBatchCompatibility);
 
             int batchBegin = 0;
@@ -2117,8 +2083,17 @@ namespace Unity.Rendering
                 if (breakBatch)
                 {
                     int numChunks = i - batchBegin;
-                    AddNewBatch(ref prevCreateInfo, ref hybridChunkInfoType,
+
+                    bool valid = AddNewBatch(ref prevCreateInfo, ref hybridChunkInfoType,
                         newChunks.GetSubArray(batchBegin, numChunks), numInstances);
+
+                    // As soon as we encounter an invalid chunk, we know that all the rest are invalid
+                    // too.
+                    if (valid)
+                        numValidNewChunks += numChunks;
+                    else
+                        return numValidNewChunks;
+
                     batchBegin = i;
                     numInstances = instancesInChunk;
                 }
@@ -2129,6 +2104,8 @@ namespace Unity.Rendering
 
                 prevCreateInfo = createInfo;
             }
+
+            return numValidNewChunks;
         }
 
         private BatchInfo CreateBatchInfo(ref BatchCreateInfo createInfo, NativeArray<ArchetypeChunk> chunks,
@@ -2158,7 +2135,8 @@ namespace Unity.Rendering
                 Allocator.Persistent,
                 NativeArrayOptions.ClearMemory);
 
-            float4x4 zeroMatrix = float4x4.zero;
+            bool zeroDefault = true;
+            float4x4 defaultValue = default;
 
             for (int i = 0; i < shaderProperties.Length; ++i)
             {
@@ -2188,6 +2166,16 @@ namespace Unity.Rendering
                             BatchPropertyIndex = i,
                             TypeIndex = materialPropertyType.TypeIndex,
                         });
+
+                        // We cannot ask default values for builtins from the material, that causes errors.
+                        // Instead, check whether one was registered manually when the overriding type
+                        // was registered. In case there are several overriding types, we use the first
+                        // one with a registered value.
+                        if (isBuiltin && zeroDefault && materialPropertyType.OverriddenDefault)
+                        {
+                            defaultValue = m_MaterialPropertyDefaultValues[materialPropertyType.TypeIndex];
+                            zeroDefault = false;
+                        }
                     }
                     else
                     {
@@ -2197,24 +2185,16 @@ namespace Unity.Rendering
 #endif
                     }
 
-
                     foundMaterialPropertyType =
                         m_MaterialPropertyTypes.TryGetNextValue(out materialPropertyType, ref it);
                 }
 
-                bool zeroDefault;
-                float4x4 defaultValue = default;
-
-                // We cannot ask default values for builtins from the material, that causes errors
-                if (isBuiltin)
+                // For non-builtin properties, we can always ask the material for defaults.
+                if (!isBuiltin)
                 {
-                    zeroDefault = true;
-                }
-                else
-                {
-                    defaultValue = MaterialPropertyDefaultValue(material, nameID, shaderProperty.SizeBytes);
-                    zeroDefault = UnsafeUtility.MemCmp(
-                        &defaultValue, &zeroMatrix, sizeof(float4x4)) == 0;
+                    var propertyDefault = DefaultValueFromMaterial(material, nameID, shaderProperty.SizeBytes);
+                    defaultValue = propertyDefault.Value;
+                    zeroDefault = !propertyDefault.Nonzero;
                 }
 
                 properties.Add(new BatchInfo.BatchProperty
@@ -2284,16 +2264,15 @@ namespace Unity.Rendering
             return -1;
         }
 
-        private float4x4 MaterialPropertyDefaultValue(
+        private MaterialPropertyDefaultValue DefaultValueFromMaterial(
             Material material, int nameID, int sizeBytes)
         {
-            float4x4 propertyDefaultValue = default;
+            MaterialPropertyDefaultValue propertyDefaultValue = default;
 
             switch (sizeBytes)
             {
                 case 4:
-                    var s = material.GetFloat(nameID);
-                    propertyDefaultValue[0] = s;
+                    propertyDefaultValue = new MaterialPropertyDefaultValue(material.GetFloat(nameID));
                     break;
                 case 16:
                     var shader = material.shader;
@@ -2302,14 +2281,16 @@ namespace Unity.Rendering
                     var type = shader.GetPropertyType(i);
                     if (type == ShaderPropertyType.Color)
                         if (QualitySettings.activeColorSpace == ColorSpace.Linear)
-                            propertyDefaultValue.c0 = (Vector4)material.GetColor(nameID).linear;
+                            propertyDefaultValue =
+                                new MaterialPropertyDefaultValue((Vector4)material.GetColor(nameID).linear);
                         else
-                            propertyDefaultValue.c0 = (Vector4)material.GetColor(nameID).gamma;
+                            propertyDefaultValue =
+                                new MaterialPropertyDefaultValue((Vector4)material.GetColor(nameID).gamma);
                     else
-                        propertyDefaultValue.c0 = material.GetVector(nameID);
+                        propertyDefaultValue = new MaterialPropertyDefaultValue(material.GetVector(nameID));
                     break;
                 case 64:
-                    propertyDefaultValue = (float4x4)material.GetMatrix(nameID);
+                    propertyDefaultValue = new MaterialPropertyDefaultValue((float4x4)material.GetMatrix(nameID));
                     break;
             }
 
@@ -2390,13 +2371,13 @@ namespace Unity.Rendering
             return overriddenProperties;
         }
 
-        private void AddNewBatch(ref BatchCreateInfo createInfo,
+        private bool AddNewBatch(ref BatchCreateInfo createInfo,
             ref ArchetypeChunkComponentType<HybridChunkInfo> hybridChunkInfoType,
             NativeArray<ArchetypeChunk> batchChunks,
             int numInstances)
         {
             if (!createInfo.Valid)
-                return;
+                return false;
 
             ref var renderMesh = ref createInfo.RenderMesh;
 
@@ -2491,6 +2472,8 @@ namespace Unity.Rendering
 
             m_BatchInfos[internalBatchIndex] = batchInfo;
             m_BatchMotionInfos[internalBatchIndex] = batchMotionInfo;
+
+            return true;
         }
 
         private void SetBatchMetadata(int externalBatchIndex, ref BatchInfo batchInfo, Material material)
@@ -2680,13 +2663,6 @@ namespace Unity.Rendering
             public ArchetypeChunkComponentType<RootLodRequirement> RootLodRequirements;
             public ArchetypeChunkComponentType<LodRequirement> InstanceLodRequirements;
             public ArchetypeChunkComponentType<PerInstanceCullingTag> PerInstanceCullingTag;
-        }
-
-        private struct ChunkComponentCopyDescriptor
-        {
-            internal void* SourcePtr;
-            internal int DestinationOffset;
-            internal int SizeBytes;
         }
 
         private struct DefaultValueBlitDescriptor
