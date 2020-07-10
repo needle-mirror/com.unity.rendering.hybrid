@@ -25,7 +25,7 @@ namespace Unity.Rendering
             public NativeArray<WorldRenderBounds> RenderBounds;
 
             public Entity SceneBoundsEntity;
-            public ComponentDataFromEntity<SceneBoundingVolume> SceneBounds;
+            public ComponentDataFromEntity<Unity.Scenes.SceneBoundingVolume> SceneBounds;
 
             public void Execute()
             {
@@ -33,7 +33,7 @@ namespace Unity.Rendering
                 for (int i = 0; i != RenderBounds.Length; i++)
                     minMaxAabb.Encapsulate(RenderBounds[i].Value);
 
-                SceneBounds[SceneBoundsEntity] = new SceneBoundingVolume { Value = minMaxAabb };
+                SceneBounds[SceneBoundsEntity] = new Unity.Scenes.SceneBoundingVolume { Value = minMaxAabb };
             }
         }
 
@@ -53,13 +53,13 @@ namespace Unity.Rendering
 
                 query.SetSharedComponentFilter(section);
 
-                var entity = EntityManager.CreateEntity(typeof(SceneBoundingVolume));
+                var entity = EntityManager.CreateEntity(typeof(Unity.Scenes.SceneBoundingVolume));
                 EntityManager.AddSharedComponentData(entity, section);
 
                 var job = new CollectSceneBoundsJob();
                 job.RenderBounds = query.ToComponentDataArray<WorldRenderBounds>(Allocator.TempJob);
                 job.SceneBoundsEntity = entity;
-                job.SceneBounds = GetComponentDataFromEntity<SceneBoundingVolume>();
+                job.SceneBounds = GetComponentDataFromEntity<Unity.Scenes.SceneBoundingVolume>();
                 job.Run();
             }
 
@@ -121,10 +121,10 @@ namespace Unity.Rendering
         [BurstCompile]
         struct BoundsJob : IJobChunk
         {
-            [ReadOnly] public ArchetypeChunkComponentType<RenderBounds> RendererBounds;
-            [ReadOnly] public ArchetypeChunkComponentType<LocalToWorld> LocalToWorld;
-            public ArchetypeChunkComponentType<WorldRenderBounds> WorldRenderBounds;
-            public ArchetypeChunkComponentType<ChunkWorldRenderBounds> ChunkWorldRenderBounds;
+            [ReadOnly] public ComponentTypeHandle<RenderBounds> RendererBounds;
+            [ReadOnly] public ComponentTypeHandle<LocalToWorld> LocalToWorld;
+            public ComponentTypeHandle<WorldRenderBounds> WorldRenderBounds;
+            public ComponentTypeHandle<ChunkWorldRenderBounds> ChunkWorldRenderBounds;
 
             public void Execute(ArchetypeChunk chunk, int chunkIndex, int firstEntityIndex)
             {
@@ -160,10 +160,10 @@ namespace Unity.Rendering
         {
             var boundsJob = new BoundsJob
             {
-                RendererBounds = GetArchetypeChunkComponentType<RenderBounds>(true),
-                LocalToWorld = GetArchetypeChunkComponentType<LocalToWorld>(true),
-                WorldRenderBounds = GetArchetypeChunkComponentType<WorldRenderBounds>(),
-                ChunkWorldRenderBounds = GetArchetypeChunkComponentType<ChunkWorldRenderBounds>(),
+                RendererBounds = GetComponentTypeHandle<RenderBounds>(true),
+                LocalToWorld = GetComponentTypeHandle<LocalToWorld>(true),
+                WorldRenderBounds = GetComponentTypeHandle<WorldRenderBounds>(),
+                ChunkWorldRenderBounds = GetComponentTypeHandle<ChunkWorldRenderBounds>(),
             };
             return boundsJob.ScheduleParallel(m_WorldRenderBounds, dependency);
         }

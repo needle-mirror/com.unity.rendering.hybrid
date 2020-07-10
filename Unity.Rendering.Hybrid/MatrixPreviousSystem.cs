@@ -25,14 +25,14 @@ namespace Unity.Rendering
         [BurstCompile]
         struct UpdateMatrixPrevious : IJobChunk
         {
-            [ReadOnly] public ArchetypeChunkComponentType<LocalToWorld> LocalToWorldType;
-            public ArchetypeChunkComponentType<BuiltinMaterialPropertyUnity_MatrixPreviousM> MatrixPreviousType;
+            [ReadOnly] public ComponentTypeHandle<LocalToWorld> LocalToWorldTypeHandle;
+            public ComponentTypeHandle<BuiltinMaterialPropertyUnity_MatrixPreviousM> MatrixPreviousTypeHandle;
             public uint LastSystemVersion;
 
             public void Execute(ArchetypeChunk chunk, int chunkIndex, int firstEntityIndex)
             {
-                var chunkLocalToWorld = chunk.GetNativeArray(LocalToWorldType);
-                var chunkMatrixPrevious = chunk.GetNativeArray(MatrixPreviousType);
+                var chunkLocalToWorld = chunk.GetNativeArray(LocalToWorldTypeHandle);
+                var chunkMatrixPrevious = chunk.GetNativeArray(MatrixPreviousTypeHandle);
                 for (int i = 0; i < chunk.Count; i++)
                 {
                     var localToWorld = chunkLocalToWorld[i].Value;
@@ -63,8 +63,8 @@ namespace Unity.Rendering
         {
             var updateMatrixPreviousJob = new UpdateMatrixPrevious
             {
-                LocalToWorldType = GetArchetypeChunkComponentType<LocalToWorld>(true),
-                MatrixPreviousType = GetArchetypeChunkComponentType<BuiltinMaterialPropertyUnity_MatrixPreviousM>(),
+                LocalToWorldTypeHandle = GetComponentTypeHandle<LocalToWorld>(true),
+                MatrixPreviousTypeHandle = GetComponentTypeHandle<BuiltinMaterialPropertyUnity_MatrixPreviousM>(),
                 LastSystemVersion = LastSystemVersion
             };
             return updateMatrixPreviousJob.Schedule(m_GroupPrev, inputDeps);

@@ -1,4 +1,5 @@
 using System;
+using Unity.Collections.LowLevel.Unsafe;
 
 namespace Unity.Rendering
 {
@@ -18,16 +19,16 @@ namespace Unity.Rendering
     [AttributeUsage(AttributeTargets.Struct, AllowMultiple = true)]
     public class MaterialPropertyAttribute : Attribute
     {
-        public MaterialPropertyAttribute(string materialPropertyName, MaterialPropertyFormat format, int overrideSize = -1)
+        public MaterialPropertyAttribute(string materialPropertyName, MaterialPropertyFormat format, short overrideSizeGPU = -1)
         {
             Name = materialPropertyName;
             Format = format;
-            OverrideSize = overrideSize;
+            OverrideSizeGPU = overrideSizeGPU;
         }
 
         public string Name { get; }
         public MaterialPropertyFormat Format { get; }
 
-        public int OverrideSize { get; }
+        public short OverrideSizeGPU { get; }
     }
 }

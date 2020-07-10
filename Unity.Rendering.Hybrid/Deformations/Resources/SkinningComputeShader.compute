@@ -1,0 +1,79 @@
+#pragma kernel SkinningComputeKernel
+
+#define NBR_THREAD_GROUPS 1024
+
+#define NBR_THREADS_X 128
+#define NBR_THREADS_Y 1
+#define NBR_THREADS_Z 1
+
+#define THREAD_COUNT NBR_THREADS_Y * NBR_THREADS_X * NBR_THREADS_Z
+#define STEP_SIZE THREAD_COUNT * NBR_THREAD_GROUPS
+
+struct VertexData
+{
+	float3 Position;
+	float3 Normal;
+	float3 Tangent;
+};
+
+struct BoneWeight
+{
+	float weight;
+	uint index;
+};
+
+uniform StructuredBuffer<BoneWeight>	_SharedMeshBoneWeights;
+uniform StructuredBuffer<uint2>			_InfluencesOffsetAndCount;
+uniform StructuredBuffer<float3x4>		_SkinMatrices;
+uniform RWStructuredBuffer<VertexData>	_DeformedMeshData : register(u1);
+
+uint g_VertexCount;
+uint g_SharedMeshStartIndex;
+uint g_SharedMeshBoneCount;
+uint g_InstanceCount;
+uint g_DeformedMeshStartIndex;
+uint g_SkinMatricesStartIndex;
+
+[numthreads(NBR_THREADS_X, NBR_THREADS_Y, NBR_THREADS_Z)]
+void SkinningComputeKernel(uint id : SV_GroupIndex, uint3 groupId : SV_GroupID)
+{
+	const uint totalNumVertices = g_VertexCount * g_InstanceCount;
+	const uint start = id + groupId[0] * THREAD_COUNT;
+
+	for (uint i = start; i < totalNumVertices; i += STEP_SIZE)
+	{
+		const uint sharedMeshVertexIndex = g_SharedMeshStartIndex + (i % g_VertexCount);
+		const uint deformedMeshVertexIndex = g_DeformedMeshStartIndex + i;
+
+		const uint2 value = _InfluencesOffsetAndCount[sharedMeshVertexIndex];
+		const uint boneInfluencesStartIndex = value[0];
+		const uint boneInfluenceCount = value[1];
+		const uint boneOffset = g_SkinMatricesStartIndex + ((i / g_VertexCount) * g_SharedMeshBoneCount);
+
+		float3 posOut = 0;
+		float3 nrmOut = 0;
+		float3 tanOut = 0;
+
+		const VertexData meshData = _DeformedMeshData[deformedMeshVertexIndex];
+		const float4 pos = float4(meshData.Position, 1);
+		const float4 nrm = float4(meshData.Normal, 0);
+		const float4 tan = float4(meshData.Tangent, 0);
+
+		for (uint j = 0; j < boneInfluenceCount; ++j)
+		{
+			const BoneWeight boneWeight = _SharedMeshBoneWeights[boneInfluencesStartIndex + j];
+			const float3x4 skinMatrix = _SkinMatrices[boneOffset + boneWeight.index];
+
+			posOut += mul(skinMatrix, pos) * boneWeight.weight;
+			nrmOut += mul(skinMatrix, nrm) * boneWeight.weight;
+			tanOut += mul(skinMatrix, tan) * boneWeight.weight;
+		}
+
+		VertexData outVertData = (VertexData)0;
+		outVertData.Position = posOut;
+		outVertData.Normal = nrmOut;
+		outVertData.Tangent = tanOut;
+
+		_DeformedMeshData[deformedMeshVertexIndex] = outVertData;
+	}
+}

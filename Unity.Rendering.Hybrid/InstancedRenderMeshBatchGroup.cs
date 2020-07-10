@@ -114,7 +114,11 @@ namespace Unity.Rendering
             {
                 if (s_JobReflectionData == IntPtr.Zero)
                 {
-                    s_JobReflectionData = JobsUtility.CreateJobReflectionData(typeof(JobNativeMultiHashMapVisitKeyMutableValueProducer<TJob, TKey, TValue>), typeof(TJob), JobType.ParallelFor, (ExecuteJobFunction)Execute);
+                    s_JobReflectionData = JobsUtility.CreateJobReflectionData(typeof(JobNativeMultiHashMapVisitKeyMutableValueProducer<TJob, TKey, TValue>), typeof(TJob)
+#if !UNITY_2020_2_OR_NEWER
+                        , JobType.ParallelFor
+#endif
+                        , (ExecuteJobFunction)Execute);
                 }
 
                 return s_JobReflectionData;
@@ -148,7 +152,7 @@ namespace Unity.Rendering
                         {
                             var key = UnsafeUtility.ReadArrayElement<TKey>(keys, entryIndex);
 
-                            producer.JobData.ExecuteNext(key, ref UnsafeUtilityEx.ArrayElementAsRef<TValue>(values, entryIndex));
+                            producer.JobData.ExecuteNext(key, ref UnsafeUtility.ArrayElementAsRef<TValue>(values, entryIndex));
 
                             entryIndex = nextPtrs[entryIndex];
                         }
@@ -172,7 +176,11 @@ namespace Unity.Rendering
                 UnsafeUtility.AddressOf(ref jobProducer)
                 , JobNativeMultiHashMapVisitKeyMutableValueProducer<TJob, TKey, TValue>.Initialize()
                 , dependsOn
+#if UNITY_2020_2_OR_NEWER
+                , ScheduleMode.Parallel
+#else
                 , ScheduleMode.Batched
+#endif
             );
 
             return JobsUtility.ScheduleParallelFor(ref scheduleParams, hashMap.GetUnsafeBucketData().bucketCapacityMask + 1, minIndicesPerJobCount);
@@ -185,8 +193,8 @@ namespace Unity.Rendering
     {
         [ReadOnly] public LODGroupExtensions.LODParams LODParams;
         [ReadOnly] public NativeArray<byte> ForceLowLOD;
-        [ReadOnly] public ArchetypeChunkComponentType<RootLodRequirement> RootLodRequirements;
-        [ReadOnly] public ArchetypeChunkComponentType<LodRequirement> InstanceLodRequirements;
+        [ReadOnly] public ComponentTypeHandle<RootLodRequirement> RootLodRequirements;
+        [ReadOnly] public ComponentTypeHandle<LodRequirement> InstanceLodRequirements;
         public ushort CameraMoveDistanceFixed16;
         public float DistanceScale;
         public bool DistanceScaleChanged;
@@ -348,7 +356,11 @@ namespace Unity.Rendering
             {
                 if (s_JobReflectionData == IntPtr.Zero)
                 {
-                    s_JobReflectionData = JobsUtility.CreateJobReflectionData(typeof(JobNativeMultiHashMapVisitKeyValueProducer<TJob, TKey, TValue>), typeof(TJob), JobType.ParallelFor, (ExecuteJobFunction)Execute);
+                    s_JobReflectionData = JobsUtility.CreateJobReflectionData(typeof(JobNativeMultiHashMapVisitKeyValueProducer<TJob, TKey, TValue>), typeof(TJob),
+#if !UNITY_2020_2_OR_NEWER
+                        JobType.ParallelFor,
+#endif
+                       (ExecuteJobFunction)Execute);
                 }
 
                 return s_JobReflectionData;
@@ -407,7 +419,11 @@ namespace Unity.Rendering
                 UnsafeUtility.AddressOf(ref jobProducer)
                 , JobNativeMultiHashMapVisitKeyValueProducer<TJob, TKey, TValue>.Initialize()
                 , dependsOn
+#if UNITY_2020_2_OR_NEWER
+                , ScheduleMode.Parallel
+#else
                 , ScheduleMode.Batched
+#endif
             );
 
             return JobsUtility.ScheduleParallelFor(ref scheduleParams, hashMap.GetUnsafeBucketData().bucketCapacityMask + 1, minIndicesPerJobCount);
@@ -425,7 +441,7 @@ namespace Unity.Rendering
 
         [ReadOnly] public NativeArray<int> InternalToExternalRemappingTable;
 
-        [ReadOnly] public ArchetypeChunkComponentType<WorldRenderBounds> BoundsComponent;
+        [ReadOnly] public ComponentTypeHandle<WorldRenderBounds> BoundsComponent;
 
         [NativeDisableParallelForRestriction] public NativeArray<int> IndexList;
         public NativeArray<BatchVisibility> Batches;
@@ -641,7 +657,7 @@ namespace Unity.Rendering
         struct MaterialPropertyPointer
         {
             public float* ptr;
-            public ArchetypeChunkComponentTypeDynamic type;
+            public DynamicComponentTypeHandle type;
             public int numFormatComponents;
         };
 
@@ -873,8 +889,8 @@ namespace Unity.Rendering
                 {
                     ForceLowLOD = m_ForceLowLOD,
                     LODParams = lodParams,
-                    RootLodRequirements = m_ComponentSystem.GetArchetypeChunkComponentType<RootLodRequirement>(true),
-                    InstanceLodRequirements = m_ComponentSystem.GetArchetypeChunkComponentType<LodRequirement>(true),
+                    RootLodRequirements = m_ComponentSystem.GetComponentTypeHandle<RootLodRequirement>(true),
+                    InstanceLodRequirements = m_ComponentSystem.GetComponentTypeHandle<LodRequirement>(true),
                     CameraMoveDistanceFixed16 =
                         Fixed16CamDistance.FromFloatCeil(cameraMoveDistance * lodParams.distanceScale),
                     DistanceScale = lodParams.distanceScale,
@@ -909,7 +925,7 @@ namespace Unity.Rendering
             {
                 Planes = planes,
                 BatchCullingStates = batchCullingStates,
-                BoundsComponent = m_ComponentSystem.GetArchetypeChunkComponentType<WorldRenderBounds>(true),
+                BoundsComponent = m_ComponentSystem.GetComponentTypeHandle<WorldRenderBounds>(true),
                 IndexList = cullingContext.visibleIndices,
                 Batches = cullingContext.batchVisibility,
                 InternalToExternalRemappingTable = m_InternalToExternalIds,
@@ -972,11 +988,11 @@ namespace Unity.Rendering
             m_ExternalToInternalIds[externalBatchIndex] = internalBatchIndex;
             m_InternalToExternalIds[internalBatchIndex] = externalBatchIndex;
 
-            var boundsType = m_ComponentSystem.GetArchetypeChunkComponentType<ChunkWorldRenderBounds>(true);
-            var localToWorldType = m_ComponentSystem.GetArchetypeChunkComponentType<LocalToWorld>(true);
-            var rootLodRequirements = m_ComponentSystem.GetArchetypeChunkComponentType<RootLodRequirement>(true);
-            var instanceLodRequirements = m_ComponentSystem.GetArchetypeChunkComponentType<LodRequirement>(true);
-            var perInstanceCullingTag = m_ComponentSystem.GetArchetypeChunkComponentType<PerInstanceCullingTag>(true);
+            var boundsType = m_ComponentSystem.GetComponentTypeHandle<ChunkWorldRenderBounds>(true);
+            var localToWorldType = m_ComponentSystem.GetComponentTypeHandle<LocalToWorld>(true);
+            var rootLodRequirements = m_ComponentSystem.GetComponentTypeHandle<RootLodRequirement>(true);
+            var instanceLodRequirements = m_ComponentSystem.GetComponentTypeHandle<LodRequirement>(true);
+            var perInstanceCullingTag = m_ComponentSystem.GetComponentTypeHandle<PerInstanceCullingTag>(true);
 
             var shader = material.shader;
             var numProperties = shader.GetPropertyCount();
@@ -1050,7 +1066,7 @@ namespace Unity.Rendering
                         m_MaterialPropertyPointers[numShaderMaterialProperties++] = new MaterialPropertyPointer
                         {
                             ptr = nativePtr,
-                            type = m_ComponentSystem.GetArchetypeChunkComponentTypeDynamic(
+                            type = m_ComponentSystem.GetDynamicComponentTypeHandle(
                                 ComponentType.ReadOnly(m_MaterialPropertyTypes[materialPropertyIndex].typeIndex)),
                             numFormatComponents = m_MaterialPropertyTypes[materialPropertyIndex].numFormatComponents
                         };

@@ -13,8 +13,10 @@ namespace Unity.Rendering
     internal enum OperationType : int
     {
         Upload = 0,
-        Matrix = 1,
-        Matrix_Inverse = 2,
+        Matrix_4x4 = 1,
+        Matrix_Inverse_4x4 = 2,
+        Matrix_3x4 = 3,
+        Matrix_Inverse_3x4 = 4,
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -91,10 +93,16 @@ namespace Unity.Rendering
             AddUpload(array.GetUnsafeReadOnlyPtr(), size, offsetInBytes, repeatCount);
         }
 
-        // Expects an array of float4x4
-        public void AddMatrixUpload(void* src, int numMatrices, int offset, int offsetInverse)
+        public enum MatrixType
         {
-            var size = numMatrices * sizeof(float4x3);
+            MatrixType4x4,
+            MatrixType3x4,
+        }
+
+        // Expects an array of float4x4
+        public void AddMatrixUpload(void* src, int numMatrices, int offset, int offsetInverse, MatrixType srcType, MatrixType dstType)
+        {
+            var size = numMatrices * sizeof(float3x4);
             var dataOffset = Interlocked.Add(ref m_Data->m_CurrDataOffset, size);
 
             if (dataOffset > m_Data->m_MaxDataOffset)
@@ -109,19 +117,29 @@ namespace Unity.Rendering
 
             var dst = m_Data->m_DataPtr + dataOffset;
             var ptr = (byte*)src;
-            for (int i = 0; i < numMatrices; ++i)
+            if (srcType == MatrixType.MatrixType4x4)
             {
-                for (int j = 0; j < 4; ++j)
+                for (int i = 0; i < numMatrices; ++i)
                 {
-                    UnsafeUtility.MemCpy(dst, ptr, 12);
-                    dst += 12;
-                    ptr += 16;
+                    for (int j = 0; j < 4; ++j)
+                    {
+                        UnsafeUtility.MemCpy(dst, ptr, 12);
+                        dst += 12;
+                        ptr += 16;
+                    }
                 }
             }
+            else
+            {
+                UnsafeUtility.MemCpy(dst + dataOffset, src, size);
+            }
+
+            var uploadType = (offsetInverse == -1) ? (uint)OperationType.Matrix_4x4 : (uint)OperationType.Matrix_Inverse_4x4;
+            uploadType += (dstType == MatrixType.MatrixType3x4) ? 2u : 0u;
 
             m_Data->m_OperationsPtr[operationIndex] = new Operation
             {
-                type = (offsetInverse == -1) ? (uint)OperationType.Matrix : (uint)OperationType.Matrix_Inverse,
+                type = uploadType,
                 srcOffset = (uint)dataOffset,
                 dstOffset = (uint)offset,
                 dstOffsetExtra = (uint)offsetInverse,
@@ -176,6 +194,17 @@ namespace Unity.Rendering
 
         public void Dispose()
         {
+            ReleaseAllUploadBuffers();
+            UnsafeUtility.Free(m_ThreadData, Allocator.Persistent);
+        }
+
+        public void ReplaceBuffer(ComputeBuffer buffer)
+        {
+            m_DestinationBuffer = buffer;
+        }
+
+        public void ReleaseAllUploadBuffers()
+        {
             for (int i = 0; i < k_NumBufferedFrames; ++i)
             {
                 if (m_DataBuffer[i] != null)
@@ -184,8 +213,6 @@ namespace Unity.Rendering
                 if (m_OperationsBuffer[i] != null)
                     m_OperationsBuffer[i].Dispose();
             }
-
-            UnsafeUtility.Free(m_ThreadData, Allocator.Persistent);
         }
 
         public unsafe ThreadedSparseUploader Begin(int maxDataSizeInBytes, int maxOperationCount)
@@ -252,8 +279,8 @@ namespace Unity.Rendering
             if (m_ThreadData->m_CurrOperation > 0)
             {
                 m_SparseUploaderShader.SetBuffer(m_KernelIndex, "operations", m_OperationsBuffer[m_CurrFrame]);
-                m_SparseUploaderShader.SetBuffer(m_KernelIndex, "src", m_DataBuffer[m_CurrFrame]);
-                m_SparseUploaderShader.SetBuffer(m_KernelIndex, "dst", m_DestinationBuffer);
+                m_SparseUploaderShader.SetBuffer(m_KernelIndex, "srcBuffer", m_DataBuffer[m_CurrFrame]);
+                m_SparseUploaderShader.SetBuffer(m_KernelIndex, "dstBuffer", m_DestinationBuffer);
                 m_SparseUploaderShader.Dispatch(m_KernelIndex, m_ThreadData->m_CurrOperation, 1, 1);
             }
 

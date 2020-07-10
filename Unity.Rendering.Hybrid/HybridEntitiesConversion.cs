@@ -25,6 +25,7 @@ namespace Unity.Rendering
             Entities.ForEach((Light light) =>
             {
                 AddHybridComponent(light);
+                ConfigureEditorRenderData(GetPrimaryEntity(light), light.gameObject, true);
             });
 #endif
 

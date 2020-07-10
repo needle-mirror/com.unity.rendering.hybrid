@@ -13,7 +13,9 @@
         "Unity.Mathematics.Extensions.Hybrid",
         "Unity.RenderPipelines.HighDefinition.Runtime",
         "Unity.RenderPipelines.Universal.Runtime",
-        "Unity.RenderPipelines.Core.Runtime"
+        "Unity.RenderPipelines.Core.Runtime",		
+        "Unity.Deformations",
+        "Unity.Scenes"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
@@ -52,6 +54,21 @@
             "name": "com.unity.render-pipelines.core",
             "expression": "8.9.9",
             "define": "SRP_9_0_0_OR_NEWER"
+        },
+        {
+            "name": "com.unity.render-pipelines.high-definition",
+            "expression": "9.9.9",
+            "define": "HDRP_10_0_0_OR_NEWER"
+        },
+        {
+            "name": "com.unity.render-pipelines.universal",
+            "expression": "9.9.9",
+            "define": "URP_10_0_0_OR_NEWER"
+        },
+        {
+            "name": "com.unity.render-pipelines.core",
+            "expression": "9.9.9",
+            "define": "SRP_10_0_0_OR_NEWER"
         },
         {
             "name": "com.unity.tiny",

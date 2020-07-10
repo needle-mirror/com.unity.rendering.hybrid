@@ -13,13 +13,13 @@ namespace Unity.Rendering
     struct GatherChunkRenderers : IJobParallelFor
     {
         [ReadOnly] public NativeArray<ArchetypeChunk> Chunks;
-        [ReadOnly] public ArchetypeChunkSharedComponentType<RenderMesh> RenderMeshType;
+        [ReadOnly] public SharedComponentTypeHandle<RenderMesh> RenderMeshTypeHandle;
         public NativeArray<int> ChunkRenderer;
 
         public void Execute(int chunkIndex)
         {
             var chunk = Chunks[chunkIndex];
-            var sharedIndex = chunk.GetSharedComponentIndex(RenderMeshType);
+            var sharedIndex = chunk.GetSharedComponentIndex(RenderMeshTypeHandle);
             ChunkRenderer[chunkIndex] = sharedIndex;
         }
     }
@@ -32,7 +32,7 @@ namespace Unity.Rendering
     }
 
     /// <summary>
-    /// Renders all Entities containing both RenderMesh & LocalToWorld components.
+    /// Renders all Entities containing both RenderMesh and LocalToWorld components.
     /// </summary>
 #if !ENABLE_HYBRID_RENDERER_V2
     [ExecuteAlways]
@@ -107,9 +107,9 @@ namespace Unity.Rendering
         public void CacheMeshBatchRendererGroup(FrozenRenderSceneTag tag, NativeArray<ArchetypeChunk> chunks,
             int chunkCount)
         {
-            var RenderMeshType = GetArchetypeChunkSharedComponentType<RenderMesh>();
-            var meshInstanceFlippedTagType = GetArchetypeChunkComponentType<RenderMeshFlippedWindingTag>();
-            var editorRenderDataType = GetArchetypeChunkSharedComponentType<EditorRenderData>();
+            var RenderMeshType = GetSharedComponentTypeHandle<RenderMesh>();
+            var meshInstanceFlippedTagType = GetComponentTypeHandle<RenderMeshFlippedWindingTag>();
+            var editorRenderDataType = GetSharedComponentTypeHandle<EditorRenderData>();
 
             Profiler.BeginSample("Sort Shared Renderers");
             var chunkRenderer = new NativeArray<int>(chunkCount, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
@@ -118,7 +118,7 @@ namespace Unity.Rendering
             var gatherChunkRenderersJob = new GatherChunkRenderers
             {
                 Chunks = chunks,
-                RenderMeshType = RenderMeshType,
+                RenderMeshTypeHandle = RenderMeshType,
                 ChunkRenderer = chunkRenderer
             };
             var gatherChunkRenderersJobHandle = gatherChunkRenderersJob.Schedule(chunkCount, 64);

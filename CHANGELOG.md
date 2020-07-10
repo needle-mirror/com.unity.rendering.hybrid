@@ -1,15 +1,48 @@
-# Change log
+# Changelog
 
-## [0.5.2] - 2020-06-09
+## [0.7.0] - 2020-07-10
 
-### Changes
+### Added
 
-* Updated dependencies of this package.
+* Added support for controling persistent GPU buffer sizes through the Project Settings
+
+### Changed
+
+* Updated minimum Unity Editor version to 2020.1.0b15 (40d9420e7de8)
+* Changed SkinnedMeshRendererConversion to take the RootBone into account. The render entities are now parented to the RootBone entity instead of the SkinnedMeshRenderer GameObject entity. As a result the RenderBounds will update correctly when the root bone is transformed. 
+* Changed SkinnedMeshRendererConversion to compute the SkinMatrices in SkinnedMeshRenderer's root bone space instead of worldspace.
+
+### Fixed
+
+* Improved hashing of the RenderMesh component.
+* Fixed an issue where blendshapes were applied with incorrect weights when the blendshapes were sparse.
+* Fixed render bounds being offset on converted SkinnedMeshRenderers.
+
+### Known Issues
+
+* This version is not compatible with 2020.2.0a17. Please update to the forthcoming alpha.
 
 
-## [0.5.1] - 2020-05-25
+## [0.6.0] - 2020-05-27
 
-**This version requires Unity 2019.3.12f1+**
+### Added
+
+* Added support for Mesh Deformations using compute shaders.
+* Added support for sparse Blendshapes in the compute deformation system.
+* Added support for Skinning using sparse bone weights with n number of influences in the compute deformation system.
+* Added support for storing matrices as 3x4 on the GPU side. This will used for SRP 10.x series of packages and up.
+* Added support for ambient probe environment lighting in URP.
+
+### Changed
+
+* Updated minimum Unity Editor version to 2020.1.0b9 (9c0aec301c8d)
+
+### Fixed
+
+* Fix floating point precision issue in vertex shader skinning.
+* Fixed culling of hybrid lights in SceneView when using LiveLink (on 2020.1).
+
+## [0.5.1] - 2020-05-04
 
 ### Changed
 

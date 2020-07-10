@@ -1,4 +1,5 @@
 using System;
+using Unity.Core;
 using Unity.Entities;
 using Unity.Mathematics;
 using Unity.Transforms;
@@ -97,13 +98,25 @@ namespace Unity.Rendering
         public override int GetHashCode()
         {
             int hash = 0;
-            if (!ReferenceEquals(mesh, null)) hash ^= mesh.GetHashCode();
-            if (!ReferenceEquals(material, null)) hash ^= material.GetHashCode();
-            hash ^= subMesh.GetHashCode();
-            hash ^= layer.GetHashCode();
-            hash ^= castShadows.GetHashCode();
-            hash ^= receiveShadows.GetHashCode();
-            hash ^= needMotionVectorPass.GetHashCode();
+            int flags = 0;
+            flags |= (receiveShadows ? 1 : 0) << 0;
+            flags |= (needMotionVectorPass ? 1 : 0) << 1;
+
+            unsafe
+            {
+                var buffer = stackalloc[]
+                {
+                    ReferenceEquals(mesh, null) ? 0 : mesh.GetHashCode(),
+                    ReferenceEquals(material, null) ? 0 : material.GetHashCode(),
+                    subMesh.GetHashCode(),
+                    layer.GetHashCode(),
+                    castShadows.GetHashCode(),
+                    flags
+                };
+
+                hash = (int)XXHash.Hash32((byte*)buffer, 6 * 4);
+            }
+
             return hash;
         }
     }

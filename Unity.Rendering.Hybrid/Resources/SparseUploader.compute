@@ -1,8 +1,10 @@
 #pragma kernel CopyKernel
 
 static const uint kOperationType_Upload = 0;
-static const uint kOperationType_Matrix = 1;
-static const uint kOperationType_Matrix_Inverse = 2;
+static const uint kOperationType_Matrix_4x4 = 1;
+static const uint kOperationType_Matrix_Inverse_4x4 = 2;
+static const uint kOperationType_Matrix_3x4 = 3;
+static const uint kOperationType_Matrix_Inverse_3x4 = 4;
 
 struct Operation
 {
@@ -16,12 +18,12 @@ struct Operation
 
 StructuredBuffer<Operation> operations;
 
-ByteAddressBuffer src;
-RWByteAddressBuffer dst;
+ByteAddressBuffer srcBuffer;
+RWByteAddressBuffer dstBuffer;
 
-#define NUM_THREADS 64
+#define GROUP_SIZE 64
 #define NUM_BYTES_PER_THREAD 4
-#define NUM_BYTES_PER_GROUP (NUM_THREADS * NUM_BYTES_PER_THREAD)
+#define NUM_BYTES_PER_GROUP (GROUP_SIZE * NUM_BYTES_PER_THREAD)
 
 void CopyToGPU(Operation operation, uint threadID)
 {
@@ -31,8 +33,8 @@ void CopyToGPU(Operation operation, uint threadID)
     uint dstIndex = threadID * NUM_BYTES_PER_THREAD;
     for (uint i = 0; i < numFullWaves; i += 1)
     {
-        uint val = src.Load(srcIndex + operation.srcOffset);
-		dst.Store(dstIndex + operation.dstOffset, val);
+        uint val = srcBuffer.Load(srcIndex + operation.srcOffset);
+		dstBuffer.Store(dstIndex + operation.dstOffset, val);
 
         srcIndex = (srcIndex + NUM_BYTES_PER_GROUP) % operation.size;
         dstIndex += NUM_BYTES_PER_GROUP;
@@ -40,31 +42,44 @@ void CopyToGPU(Operation operation, uint threadID)
 
     if (dstIndex < (operation.size * operation.count))
     {
-        uint val = src.Load(srcIndex + operation.srcOffset);
-		dst.Store(dstIndex + operation.dstOffset, val);
+        uint val = srcBuffer.Load(srcIndex + operation.srcOffset);
+		dstBuffer.Store(dstIndex + operation.dstOffset, val);
     }
 }
 
-float4x4 loadMatrixSrc(ByteAddressBuffer buf, uint offset)
+float3x4 loadMatrixSrc(ByteAddressBuffer buf, uint offset)
 {
-    float4 p1 = asfloat(buf.Load4(offset +  0));
-    float4 p2 = asfloat(buf.Load4(offset + 16));
-    float4 p3 = asfloat(buf.Load4(offset + 32));
+    // Read in 4 columns of float3 data each.
+    // Done in 3 load4 and then repacking into final 3x4 matrix
+    float4 p1 = asfloat(buf.Load4(offset + 0 * 16));
+    float4 p2 = asfloat(buf.Load4(offset + 1 * 16));
+    float4 p3 = asfloat(buf.Load4(offset + 2 * 16));
 
-    return float4x4(
-        p1.x, p1.y, p1.z, 0.0,
-        p1.w, p2.x, p2.y, 0.0,
-        p2.z, p2.w, p3.x, 0.0,
-        p3.y, p3.z, p3.w, 1.0
+    return float3x4(
+        p1.x, p1.w, p2.z, p3.y,
+        p1.y, p2.x, p2.w, p3.z,
+        p1.z, p2.y, p3.x, p3.w
     );
 }
 
-void storeMatrixDst(RWByteAddressBuffer buf, uint offset, float4x4 mat)
+void storeMatrixDst_4x4(RWByteAddressBuffer buf, uint offset, float3x4 mat)
 {
-    buf.Store4(offset +  0, asuint(mat[0]));
-    buf.Store4(offset + 16, asuint(mat[1]));
-    buf.Store4(offset + 32, asuint(mat[2]));
-    buf.Store4(offset + 48, asuint(mat[3]));
+    // Write our the columns
+    buf.Store4(offset +  0, asuint(float4(mat._m00, mat._m10, mat._m20, 0.0)));
+    buf.Store4(offset + 16, asuint(float4(mat._m01, mat._m11, mat._m21, 0.0)));
+    buf.Store4(offset + 32, asuint(float4(mat._m02, mat._m12, mat._m22, 0.0)));
+    buf.Store4(offset + 48, asuint(float4(mat._m03, mat._m13, mat._m23, 1.0)));
+}
+
+void storeMatrixDst_3x4(RWByteAddressBuffer buf, uint offset, float3x4 mat)
+{
+    // Pack the 4 float3 columns as 3 float4 so we can write it out using store4
+    float4 p1 = float4(mat._m00, mat._m10, mat._m20, mat._m01);
+    float4 p2 = float4(mat._m11, mat._m21, mat._m02, mat._m12);
+    float4 p3 = float4(mat._m22, mat._m03, mat._m13, mat._m23);
+    buf.Store4(offset +  0, asuint(p1));
+    buf.Store4(offset + 16, asuint(p2));
+    buf.Store4(offset + 32, asuint(p3));
 }
 
 float csum(float3 v)
@@ -90,84 +105,141 @@ float3x3 inverse3x3(float3x3 m)
     return float3x3(m0, m1, m2) * rcpDet;
 }
 
-float4x4 inverseAffine(float4x4 m)
+float3x4 inverseAffine(float3x4 m)
 {
     float3x3 inv = inverse3x3((float3x3)m);
-    float3 trans = float3(m._m30, m._m31, m._m32);
+    float3 trans = float3(m._m03, m._m13, m._m23);
     float3 invTrans = -mul(trans, inv);
-    return float4x4(
-        inv._m00,   inv._m10,   inv._m20,   0.0,
-        inv._m01,   inv._m11,   inv._m21,   0.0,
-        inv._m02,   inv._m12,   inv._m22,   0.0,
-        invTrans.x, invTrans.y, invTrans.z, 1.0);
+    return float3x4(
+        inv._m00, inv._m10, inv._m20, invTrans.x,
+        inv._m01, inv._m11, inv._m21, invTrans.y,
+        inv._m02, inv._m12, inv._m22, invTrans.z);
 }
 
-void CopyMatrix(Operation operation, uint din, uint dout)
+void CopyMatrix_4x4(Operation operation, uint din, uint dout)
 {
-    float4x4 orig = loadMatrixSrc(src, operation.srcOffset + din);
-    storeMatrixDst(dst, operation.dstOffset + dout, orig);
+    float3x4 orig = loadMatrixSrc(srcBuffer, operation.srcOffset + din);
+    storeMatrixDst_4x4(dstBuffer, operation.dstOffset + dout, orig);
 }
 
-void CopyAndInverseMatrix(Operation operation, uint din, uint dout)
+void CopyMatrix_3x4(Operation operation, uint din, uint dout)
 {
-    float4x4 orig = loadMatrixSrc(src, operation.srcOffset + din);
-    float4x4 inv = inverseAffine(orig);
-    storeMatrixDst(dst, operation.dstOffset + dout, orig);
-    storeMatrixDst(dst, operation.dstOffsetExtra + dout, inv);
+    float3x4 orig = loadMatrixSrc(srcBuffer, operation.srcOffset + din);
+    storeMatrixDst_3x4(dstBuffer, operation.dstOffset + dout, orig);
+}
+
+void CopyAndInverseMatrix_4x4(Operation operation, uint din, uint dout)
+{
+    float3x4 orig = loadMatrixSrc(srcBuffer, operation.srcOffset + din);
+    float3x4 inv = inverseAffine(orig);
+    storeMatrixDst_4x4(dstBuffer, operation.dstOffset + dout, orig);
+    storeMatrixDst_4x4(dstBuffer, operation.dstOffsetExtra + dout, inv);
+}
+
+void CopyAndInverseMatrix_3x4(Operation operation, uint din, uint dout)
+{
+    float3x4 orig = loadMatrixSrc(srcBuffer, operation.srcOffset + din);
+    float3x4 inv = inverseAffine(orig);
+    storeMatrixDst_3x4(dstBuffer, operation.dstOffset + dout, orig);
+    storeMatrixDst_3x4(dstBuffer, operation.dstOffsetExtra + dout, inv);
 }
 
 #define NUM_MATRIX_INPUT_BYTES_PER_THREAD 48
-#define NUM_MATRIX_INPUT_BYTES_PER_GROUP (NUM_THREADS * NUM_MATRIX_INPUT_BYTES_PER_THREAD)
-#define NUM_MATRIX_OUTPUT_BYTES_PER_THREAD 64
-#define NUM_MATRIX_OUTPUT_BYTES_PER_GROUP (NUM_THREADS * NUM_MATRIX_OUTPUT_BYTES_PER_THREAD)
+#define NUM_MATRIX_INPUT_BYTES_PER_GROUP (GROUP_SIZE * NUM_MATRIX_INPUT_BYTES_PER_THREAD)
+#define NUM_MATRIX_OUTPUT_BYTES_PER_THREAD_4x4 64
+#define NUM_MATRIX_OUTPUT_BYTES_PER_GROUP_4x4 (GROUP_SIZE * NUM_MATRIX_OUTPUT_BYTES_PER_THREAD_4x4)
+#define NUM_MATRIX_OUTPUT_BYTES_PER_THREAD_3x4 48
+#define NUM_MATRIX_OUTPUT_BYTES_PER_GROUP_3x4 (GROUP_SIZE * NUM_MATRIX_OUTPUT_BYTES_PER_THREAD_3x4)
 
-void MatricesToGPU(Operation operation, uint threadID)
+void MatricesToGPU_4x4(Operation operation, uint threadID)
 {
     uint numFullWaves = operation.size / NUM_MATRIX_INPUT_BYTES_PER_GROUP;
     uint inputIndex = threadID * NUM_MATRIX_INPUT_BYTES_PER_THREAD;
-    uint outputIndex = threadID * NUM_MATRIX_OUTPUT_BYTES_PER_THREAD;
+    uint outputIndex = threadID * NUM_MATRIX_OUTPUT_BYTES_PER_THREAD_4x4;
 
     for (uint i = 0; i < numFullWaves; ++i)
     {
-        CopyMatrix(operation, inputIndex, outputIndex);
+        CopyMatrix_4x4(operation, inputIndex, outputIndex);
         inputIndex += NUM_MATRIX_INPUT_BYTES_PER_GROUP;
-        outputIndex += NUM_MATRIX_OUTPUT_BYTES_PER_GROUP;
+        outputIndex += NUM_MATRIX_OUTPUT_BYTES_PER_GROUP_4x4;
     }
 
     if (inputIndex < operation.size)
     {
-        CopyMatrix(operation, inputIndex, outputIndex);
+        CopyMatrix_4x4(operation, inputIndex, outputIndex);
     }
 }
 
-void InverseMatricesToGPU(Operation operation, uint threadID)
+void MatricesToGPU_3x4(Operation operation, uint threadID)
 {
     uint numFullWaves = operation.size / NUM_MATRIX_INPUT_BYTES_PER_GROUP;
     uint inputIndex = threadID * NUM_MATRIX_INPUT_BYTES_PER_THREAD;
-    uint outputIndex = threadID * NUM_MATRIX_OUTPUT_BYTES_PER_THREAD;
+    uint outputIndex = threadID * NUM_MATRIX_OUTPUT_BYTES_PER_THREAD_3x4;
 
     for (uint i = 0; i < numFullWaves; ++i)
     {
-        CopyAndInverseMatrix(operation, inputIndex, outputIndex);
+        CopyMatrix_3x4(operation, inputIndex, outputIndex);
         inputIndex += NUM_MATRIX_INPUT_BYTES_PER_GROUP;
-        outputIndex += NUM_MATRIX_OUTPUT_BYTES_PER_GROUP;
+        outputIndex += NUM_MATRIX_OUTPUT_BYTES_PER_GROUP_3x4;
     }
 
     if (inputIndex < operation.size)
     {
-        CopyAndInverseMatrix(operation, inputIndex, outputIndex);
+        CopyMatrix_3x4(operation, inputIndex, outputIndex);
     }
 }
 
-[numthreads(NUM_THREADS, 1, 1)]
+void InverseMatricesToGPU_4x4(Operation operation, uint threadID)
+{
+    uint numFullWaves = operation.size / NUM_MATRIX_INPUT_BYTES_PER_GROUP;
+    uint inputIndex = threadID * NUM_MATRIX_INPUT_BYTES_PER_THREAD;
+    uint outputIndex = threadID * NUM_MATRIX_OUTPUT_BYTES_PER_THREAD_4x4;
+
+    for (uint i = 0; i < numFullWaves; ++i)
+    {
+        CopyAndInverseMatrix_4x4(operation, inputIndex, outputIndex);
+        inputIndex += NUM_MATRIX_INPUT_BYTES_PER_GROUP;
+        outputIndex += NUM_MATRIX_OUTPUT_BYTES_PER_GROUP_4x4;
+    }
+
+    if (inputIndex < operation.size)
+    {
+        CopyAndInverseMatrix_4x4(operation, inputIndex, outputIndex);
+    }
+}
+
+void InverseMatricesToGPU_3x4(Operation operation, uint threadID)
+{
+    uint numFullWaves = operation.size / NUM_MATRIX_INPUT_BYTES_PER_GROUP;
+    uint inputIndex = threadID * NUM_MATRIX_INPUT_BYTES_PER_THREAD;
+    uint outputIndex = threadID * NUM_MATRIX_OUTPUT_BYTES_PER_THREAD_3x4;
+
+    for (uint i = 0; i < numFullWaves; ++i)
+    {
+        CopyAndInverseMatrix_3x4(operation, inputIndex, outputIndex);
+        inputIndex += NUM_MATRIX_INPUT_BYTES_PER_GROUP;
+        outputIndex += NUM_MATRIX_OUTPUT_BYTES_PER_GROUP_3x4;
+    }
+
+    if (inputIndex < operation.size)
+    {
+        CopyAndInverseMatrix_3x4(operation, inputIndex, outputIndex);
+    }
+}
+
+[numthreads(GROUP_SIZE, 1, 1)]
 void CopyKernel(uint threadID : SV_GroupThreadID, uint groupID : SV_GroupID)
 {
     Operation operation = operations[groupID];
 
     if (operation.type == kOperationType_Upload)
         CopyToGPU(operation, threadID);
-    else if (operation.type == kOperationType_Matrix)
-        MatricesToGPU(operation, threadID);
-    else if (operation.type == kOperationType_Matrix_Inverse)
-        InverseMatricesToGPU(operation, threadID);
+    else if (operation.type == kOperationType_Matrix_4x4)
+        MatricesToGPU_4x4(operation, threadID);
+    else if (operation.type == kOperationType_Matrix_Inverse_4x4)
+        InverseMatricesToGPU_4x4(operation, threadID);
+    else if (operation.type == kOperationType_Matrix_3x4)
+        MatricesToGPU_3x4(operation, threadID);
+    else if (operation.type == kOperationType_Matrix_Inverse_3x4)
+        InverseMatricesToGPU_3x4(operation, threadID);
 }

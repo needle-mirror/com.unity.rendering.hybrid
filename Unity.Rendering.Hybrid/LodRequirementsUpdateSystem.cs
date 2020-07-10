@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Entities;
@@ -119,11 +120,18 @@ namespace Unity.Rendering
         {
             [ReadOnly] public ComponentDataFromEntity<MeshLODGroupComponent>    MeshLODGroupComponent;
 
-            [ReadOnly] public ArchetypeChunkComponentType<MeshLODComponent>     MeshLODComponent;
+            [ReadOnly] public ComponentTypeHandle<MeshLODComponent>     MeshLODComponent;
             [ReadOnly] public ComponentDataFromEntity<LocalToWorld>             LocalToWorldLookup;
 
-            public ArchetypeChunkComponentType<LodRequirement>                  LodRequirement;
-            public ArchetypeChunkComponentType<RootLodRequirement>              RootLodRequirement;
+            public ComponentTypeHandle<LodRequirement>                  LodRequirement;
+            public ComponentTypeHandle<RootLodRequirement>              RootLodRequirement;
+
+            [Conditional("ENABLE_UNITY_COLLECTIONS_CHECKS")]
+            private static void CheckDeepHLODSupport(Entity entity)
+            {
+                if (entity != Entity.Null)
+                    throw new System.NotImplementedException("Deep HLOD is not supported yet");
+            }
 
             public void Execute(ArchetypeChunk chunk, int chunkIndex, int firstEntityIndex)
             {
@@ -163,9 +171,7 @@ namespace Unity.Rendering
                     {
                         var parentLodGroup = MeshLODGroupComponent[parentGroupEntity];
                         rootLod.LOD = new LodRequirement(parentLodGroup, LocalToWorldLookup[parentGroupEntity], parentMask);
-
-                        if (parentLodGroup.ParentGroup != Entity.Null)
-                            throw new System.NotImplementedException("Deep HLOD is not supported yet");
+                        CheckDeepHLODSupport(parentLodGroup.ParentGroup);
                     }
 
                     rootLodRequirement[i] = rootLod;
@@ -186,10 +192,10 @@ namespace Unity.Rendering
             var updateLodJob = new UpdateLodRequirementsJob
             {
                 MeshLODGroupComponent = GetComponentDataFromEntity<MeshLODGroupComponent>(true),
-                MeshLODComponent = GetArchetypeChunkComponentType<MeshLODComponent>(true),
+                MeshLODComponent = GetComponentTypeHandle<MeshLODComponent>(true),
                 LocalToWorldLookup = GetComponentDataFromEntity<LocalToWorld>(true),
-                LodRequirement = GetArchetypeChunkComponentType<LodRequirement>(),
-                RootLodRequirement = GetArchetypeChunkComponentType<RootLodRequirement>(),
+                LodRequirement = GetComponentTypeHandle<LodRequirement>(),
+                RootLodRequirement = GetComponentTypeHandle<RootLodRequirement>(),
             };
             return updateLodJob.ScheduleParallel(m_LodRenderers, dependency);
         }

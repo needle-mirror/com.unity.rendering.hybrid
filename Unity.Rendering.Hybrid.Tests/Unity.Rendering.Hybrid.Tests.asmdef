@@ -8,7 +8,7 @@
         "Unity.Mathematics",
         "Unity.Mathematics.Extensions",
         "Unity.Mathematics.Extensions.Hybrid",
-        "Unity.Scenes.Hybrid",
+        "Unity.Scenes",
         "Unity.Scenes.Editor",
         "Unity.Entities.Tests",
         "Unity.Entities",

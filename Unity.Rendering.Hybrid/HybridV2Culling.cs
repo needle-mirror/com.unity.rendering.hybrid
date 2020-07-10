@@ -69,14 +69,14 @@ namespace Unity.Rendering
     {
         [ReadOnly] public LODGroupExtensions.LODParams LODParams;
         [ReadOnly] public NativeArray<byte> ForceLowLOD;
-        [ReadOnly] public ArchetypeChunkComponentType<RootLodRequirement> RootLodRequirements;
-        [ReadOnly] public ArchetypeChunkComponentType<LodRequirement> InstanceLodRequirements;
+        [ReadOnly] public ComponentTypeHandle<RootLodRequirement> RootLodRequirements;
+        [ReadOnly] public ComponentTypeHandle<LodRequirement> InstanceLodRequirements;
         public ushort CameraMoveDistanceFixed16;
         public float DistanceScale;
         public bool DistanceScaleChanged;
 
-        public ArchetypeChunkComponentType<HybridChunkInfo> HybridChunkInfo;
-        [ReadOnly] public ArchetypeChunkComponentType<ChunkHeader> ChunkHeader;
+        public ComponentTypeHandle<HybridChunkInfo> HybridChunkInfo;
+        [ReadOnly] public ComponentTypeHandle<ChunkHeader> ChunkHeader;
 
 #if UNITY_EDITOR
         [NativeDisableUnsafePtrRestriction] public CullingStats* Stats;
@@ -242,10 +242,10 @@ namespace Unity.Rendering
         [DeallocateOnJobCompletion][ReadOnly] public NativeArray<FrustumPlanes.PlanePacket4> Planes;
         [ReadOnly] public NativeArray<int> InternalToExternalRemappingTable;
 
-        [ReadOnly] public ArchetypeChunkComponentType<WorldRenderBounds> BoundsComponent;
-        public ArchetypeChunkComponentType<HybridChunkInfo> HybridChunkInfo;
-        [ReadOnly] public ArchetypeChunkComponentType<ChunkHeader> ChunkHeader;
-        [ReadOnly] public ArchetypeChunkComponentType<ChunkWorldRenderBounds> ChunkWorldRenderBounds;
+        [ReadOnly] public ComponentTypeHandle<WorldRenderBounds> BoundsComponent;
+        public ComponentTypeHandle<HybridChunkInfo> HybridChunkInfo;
+        [ReadOnly] public ComponentTypeHandle<ChunkHeader> ChunkHeader;
+        [ReadOnly] public ComponentTypeHandle<ChunkWorldRenderBounds> ChunkWorldRenderBounds;
 
         [NativeDisableParallelForRestriction] public NativeArray<int> IndexList;
         [NativeDisableParallelForRestriction] public NativeArray<BatchVisibility> Batches;

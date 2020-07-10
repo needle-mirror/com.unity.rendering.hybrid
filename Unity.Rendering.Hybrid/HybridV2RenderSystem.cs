@@ -331,7 +331,7 @@ namespace Unity.Rendering
             var dstOffsetWorldToLocal = -1;
             var dstOffsetPrevWorldToLocal = -1;
 
-            fixed(ArchetypeChunkComponentTypeDynamic* fixedT0 = &ComponentTypes.t0)
+            fixed(DynamicComponentTypeHandle* fixedT0 = &ComponentTypes.t0)
             {
                 for (int i = chunkInfo.ChunkTypesBegin; i < chunkInfo.ChunkTypesEnd; ++i)
                 {
@@ -366,13 +366,13 @@ namespace Unity.Rendering
 #endif
 
                         var src = chunk.GetDynamicComponentDataArrayReinterpret<int>(type,
-                            chunkProperty.ValueSizeBytes);
+                            chunkProperty.ValueSizeBytesCPU);
 
 #if PROFILE_BURST_JOB_INTERNALS
                         ProfileAddUpload.Begin();
 #endif
 
-                        int sizeBytes = (int)((uint)chunk.Count * (uint)chunkProperty.ValueSizeBytes);
+                        int sizeBytes = (int)((uint)chunk.Count * (uint)chunkProperty.ValueSizeBytesCPU);
                         var srcPtr = src.GetUnsafeReadOnlyPtr();
                         var dstOffset = chunkProperty.GPUDataBegin;
                         if (isLocalToWorld || isPrevLocalToWorld)
@@ -382,7 +382,13 @@ namespace Unity.Rendering
                                 srcPtr,
                                 numMatrices,
                                 dstOffset,
-                                isLocalToWorld ? dstOffsetWorldToLocal : dstOffsetPrevWorldToLocal);
+                                isLocalToWorld ? dstOffsetWorldToLocal : dstOffsetPrevWorldToLocal,
+                                (chunkProperty.ValueSizeBytesCPU == 4 * 4 * 3)
+                                ? ThreadedSparseUploader.MatrixType.MatrixType3x4
+                                : ThreadedSparseUploader.MatrixType.MatrixType4x4,
+                                (chunkProperty.ValueSizeBytesGPU == 4 * 4 * 3)
+                                ? ThreadedSparseUploader.MatrixType.MatrixType3x4
+                                : ThreadedSparseUploader.MatrixType.MatrixType4x4);
                         }
                         else
                         {
@@ -449,10 +455,10 @@ namespace Unity.Rendering
     [BurstCompile]
     internal struct UpdateAllHybridChunksJob : IJobChunk
     {
-        public ArchetypeChunkComponentType<HybridChunkInfo> HybridChunkInfo;
-        [ReadOnly] public ArchetypeChunkComponentType<ChunkWorldRenderBounds> ChunkWorldRenderBounds;
-        [ReadOnly] public ArchetypeChunkComponentType<ChunkHeader> ChunkHeader;
-        [ReadOnly] public ArchetypeChunkComponentType<LocalToWorld> LocalToWorld;
+        public ComponentTypeHandle<HybridChunkInfo> HybridChunkInfo;
+        [ReadOnly] public ComponentTypeHandle<ChunkWorldRenderBounds> ChunkWorldRenderBounds;
+        [ReadOnly] public ComponentTypeHandle<ChunkHeader> ChunkHeader;
+        [ReadOnly] public ComponentTypeHandle<LocalToWorld> LocalToWorld;
         public HybridChunkUpdater HybridChunkUpdater;
 
         public void Execute(ArchetypeChunk metaChunk, int chunkIndex, int firstEntityIndex)
@@ -488,8 +494,8 @@ namespace Unity.Rendering
     [BurstCompile]
     internal struct UpdateNewHybridChunksJob : IJobParallelFor
     {
-        public ArchetypeChunkComponentType<HybridChunkInfo> HybridChunkInfo;
-        [ReadOnly] public ArchetypeChunkComponentType<ChunkWorldRenderBounds> ChunkWorldRenderBounds;
+        public ComponentTypeHandle<HybridChunkInfo> HybridChunkInfo;
+        [ReadOnly] public ComponentTypeHandle<ChunkWorldRenderBounds> ChunkWorldRenderBounds;
 
         public NativeArray<ArchetypeChunk> NewChunks;
         public HybridChunkUpdater HybridChunkUpdater;
@@ -512,7 +518,8 @@ namespace Unity.Rendering
     internal struct ChunkProperty
     {
         public int ComponentTypeIndex;
-        public int ValueSizeBytes;
+        public int ValueSizeBytesCPU;
+        public int ValueSizeBytesGPU;
         public int GPUDataBegin;
     }
 
@@ -530,14 +537,14 @@ namespace Unity.Rendering
         public ChunkInstanceLodEnabled InstanceLodEnableds; // 16     8 - 16
     }
 
-    // Helper to only call GetArchetypeChunkComponentTypeDynamic once per type per frame
+    // Helper to only call GetDynamicComponentTypeHandle once per type per frame
     internal struct ComponentTypeCache
     {
         internal NativeHashMap<int, int> UsedTypes;
 
         // Re-populated each frame with fresh objects for each used type.
         // Use C# array so we can hold SafetyHandles without problems.
-        internal ArchetypeChunkComponentTypeDynamic[] TypeDynamics;
+        internal DynamicComponentTypeHandle[] TypeDynamics;
         internal int MaxIndex;
 
         public ComponentTypeCache(int initialCapacity) : this()
@@ -576,7 +583,7 @@ namespace Unity.Rendering
 
             if (TypeDynamics == null || TypeDynamics.Length < MaxIndex + 1)
                 // Allocate according to Capacity so we grow with the same geometric formula as NativeList
-                TypeDynamics = new ArchetypeChunkComponentTypeDynamic[MaxIndex + 1];
+                TypeDynamics = new DynamicComponentTypeHandle[MaxIndex + 1];
 
             ref var keys = ref types.Keys;
             ref var values = ref types.Values;
@@ -585,7 +592,7 @@ namespace Unity.Rendering
             {
                 int arrayIndex = keys[i];
                 int typeIndex = values[i];
-                TypeDynamics[arrayIndex] = componentSystem.GetArchetypeChunkComponentTypeDynamic(
+                TypeDynamics[arrayIndex] = componentSystem.GetDynamicComponentTypeHandle(
                     ComponentType.ReadOnly(typeIndex));
             }
 
@@ -594,7 +601,7 @@ namespace Unity.Rendering
 
         public static int GetArrayIndex(int typeIndex) => typeIndex & TypeManager.ClearFlagsMask;
 
-        public ArchetypeChunkComponentTypeDynamic Type(int typeIndex)
+        public DynamicComponentTypeHandle Type(int typeIndex)
         {
             return TypeDynamics[GetArrayIndex(typeIndex)];
         }
@@ -606,137 +613,137 @@ namespace Unity.Rendering
 
             [NativeDisableParallelForRestriction] public NativeArray<int> TypeIndexToArrayIndex;
 
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t0;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t1;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t2;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t3;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t4;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t5;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t6;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t7;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t8;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t9;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t10;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t11;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t12;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t13;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t14;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t15;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t16;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t17;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t18;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t19;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t20;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t21;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t22;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t23;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t24;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t25;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t26;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t27;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t28;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t29;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t30;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t31;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t32;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t33;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t34;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t35;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t36;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t37;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t38;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t39;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t40;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t41;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t42;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t43;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t44;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t45;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t46;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t47;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t48;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t49;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t50;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t51;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t52;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t53;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t54;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t55;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t56;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t57;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t58;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t59;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t60;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t61;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t62;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t63;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t64;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t65;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t66;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t67;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t68;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t69;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t70;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t71;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t72;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t73;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t74;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t75;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t76;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t77;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t78;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t79;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t80;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t81;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t82;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t83;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t84;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t85;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t86;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t87;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t88;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t89;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t90;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t91;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t92;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t93;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t94;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t95;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t96;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t97;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t98;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t99;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t100;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t101;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t102;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t103;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t104;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t105;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t106;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t107;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t108;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t109;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t110;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t111;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t112;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t113;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t114;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t115;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t116;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t117;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t118;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t119;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t120;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t121;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t122;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t123;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t124;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t125;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t126;
-            [ReadOnly] public ArchetypeChunkComponentTypeDynamic t127;
+            [ReadOnly] public DynamicComponentTypeHandle t0;
+            [ReadOnly] public DynamicComponentTypeHandle t1;
+            [ReadOnly] public DynamicComponentTypeHandle t2;
+            [ReadOnly] public DynamicComponentTypeHandle t3;
+            [ReadOnly] public DynamicComponentTypeHandle t4;
+            [ReadOnly] public DynamicComponentTypeHandle t5;
+            [ReadOnly] public DynamicComponentTypeHandle t6;
+            [ReadOnly] public DynamicComponentTypeHandle t7;
+            [ReadOnly] public DynamicComponentTypeHandle t8;
+            [ReadOnly] public DynamicComponentTypeHandle t9;
+            [ReadOnly] public DynamicComponentTypeHandle t10;
+            [ReadOnly] public DynamicComponentTypeHandle t11;
+            [ReadOnly] public DynamicComponentTypeHandle t12;
+            [ReadOnly] public DynamicComponentTypeHandle t13;
+            [ReadOnly] public DynamicComponentTypeHandle t14;
+            [ReadOnly] public DynamicComponentTypeHandle t15;
+            [ReadOnly] public DynamicComponentTypeHandle t16;
+            [ReadOnly] public DynamicComponentTypeHandle t17;
+            [ReadOnly] public DynamicComponentTypeHandle t18;
+            [ReadOnly] public DynamicComponentTypeHandle t19;
+            [ReadOnly] public DynamicComponentTypeHandle t20;
+            [ReadOnly] public DynamicComponentTypeHandle t21;
+            [ReadOnly] public DynamicComponentTypeHandle t22;
+            [ReadOnly] public DynamicComponentTypeHandle t23;
+            [ReadOnly] public DynamicComponentTypeHandle t24;
+            [ReadOnly] public DynamicComponentTypeHandle t25;
+            [ReadOnly] public DynamicComponentTypeHandle t26;
+            [ReadOnly] public DynamicComponentTypeHandle t27;
+            [ReadOnly] public DynamicComponentTypeHandle t28;
+            [ReadOnly] public DynamicComponentTypeHandle t29;
+            [ReadOnly] public DynamicComponentTypeHandle t30;
+            [ReadOnly] public DynamicComponentTypeHandle t31;
+            [ReadOnly] public DynamicComponentTypeHandle t32;
+            [ReadOnly] public DynamicComponentTypeHandle t33;
+            [ReadOnly] public DynamicComponentTypeHandle t34;
+            [ReadOnly] public DynamicComponentTypeHandle t35;
+            [ReadOnly] public DynamicComponentTypeHandle t36;
+            [ReadOnly] public DynamicComponentTypeHandle t37;
+            [ReadOnly] public DynamicComponentTypeHandle t38;
+            [ReadOnly] public DynamicComponentTypeHandle t39;
+            [ReadOnly] public DynamicComponentTypeHandle t40;
+            [ReadOnly] public DynamicComponentTypeHandle t41;
+            [ReadOnly] public DynamicComponentTypeHandle t42;
+            [ReadOnly] public DynamicComponentTypeHandle t43;
+            [ReadOnly] public DynamicComponentTypeHandle t44;
+            [ReadOnly] public DynamicComponentTypeHandle t45;
+            [ReadOnly] public DynamicComponentTypeHandle t46;
+            [ReadOnly] public DynamicComponentTypeHandle t47;
+            [ReadOnly] public DynamicComponentTypeHandle t48;
+            [ReadOnly] public DynamicComponentTypeHandle t49;
+            [ReadOnly] public DynamicComponentTypeHandle t50;
+            [ReadOnly] public DynamicComponentTypeHandle t51;
+            [ReadOnly] public DynamicComponentTypeHandle t52;
+            [ReadOnly] public DynamicComponentTypeHandle t53;
+            [ReadOnly] public DynamicComponentTypeHandle t54;
+            [ReadOnly] public DynamicComponentTypeHandle t55;
+            [ReadOnly] public DynamicComponentTypeHandle t56;
+            [ReadOnly] public DynamicComponentTypeHandle t57;
+            [ReadOnly] public DynamicComponentTypeHandle t58;
+            [ReadOnly] public DynamicComponentTypeHandle t59;
+            [ReadOnly] public DynamicComponentTypeHandle t60;
+            [ReadOnly] public DynamicComponentTypeHandle t61;
+            [ReadOnly] public DynamicComponentTypeHandle t62;
+            [ReadOnly] public DynamicComponentTypeHandle t63;
+            [ReadOnly] public DynamicComponentTypeHandle t64;
+            [ReadOnly] public DynamicComponentTypeHandle t65;
+            [ReadOnly] public DynamicComponentTypeHandle t66;
+            [ReadOnly] public DynamicComponentTypeHandle t67;
+            [ReadOnly] public DynamicComponentTypeHandle t68;
+            [ReadOnly] public DynamicComponentTypeHandle t69;
+            [ReadOnly] public DynamicComponentTypeHandle t70;
+            [ReadOnly] public DynamicComponentTypeHandle t71;
+            [ReadOnly] public DynamicComponentTypeHandle t72;
+            [ReadOnly] public DynamicComponentTypeHandle t73;
+            [ReadOnly] public DynamicComponentTypeHandle t74;
+            [ReadOnly] public DynamicComponentTypeHandle t75;
+            [ReadOnly] public DynamicComponentTypeHandle t76;
+            [ReadOnly] public DynamicComponentTypeHandle t77;
+            [ReadOnly] public DynamicComponentTypeHandle t78;
+            [ReadOnly] public DynamicComponentTypeHandle t79;
+            [ReadOnly] public DynamicComponentTypeHandle t80;
+            [ReadOnly] public DynamicComponentTypeHandle t81;
+            [ReadOnly] public DynamicComponentTypeHandle t82;
+            [ReadOnly] public DynamicComponentTypeHandle t83;
+            [ReadOnly] public DynamicComponentTypeHandle t84;
+            [ReadOnly] public DynamicComponentTypeHandle t85;
+            [ReadOnly] public DynamicComponentTypeHandle t86;
+            [ReadOnly] public DynamicComponentTypeHandle t87;
+            [ReadOnly] public DynamicComponentTypeHandle t88;
+            [ReadOnly] public DynamicComponentTypeHandle t89;
+            [ReadOnly] public DynamicComponentTypeHandle t90;
+            [ReadOnly] public DynamicComponentTypeHandle t91;
+            [ReadOnly] public DynamicComponentTypeHandle t92;
+            [ReadOnly] public DynamicComponentTypeHandle t93;
+            [ReadOnly] public DynamicComponentTypeHandle t94;
+            [ReadOnly] public DynamicComponentTypeHandle t95;
+            [ReadOnly] public DynamicComponentTypeHandle t96;
+            [ReadOnly] public DynamicComponentTypeHandle t97;
+            [ReadOnly] public DynamicComponentTypeHandle t98;
+            [ReadOnly] public DynamicComponentTypeHandle t99;
+            [ReadOnly] public DynamicComponentTypeHandle t100;
+            [ReadOnly] public DynamicComponentTypeHandle t101;
+            [ReadOnly] public DynamicComponentTypeHandle t102;
+            [ReadOnly] public DynamicComponentTypeHandle t103;
+            [ReadOnly] public DynamicComponentTypeHandle t104;
+            [ReadOnly] public DynamicComponentTypeHandle t105;
+            [ReadOnly] public DynamicComponentTypeHandle t106;
+            [ReadOnly] public DynamicComponentTypeHandle t107;
+            [ReadOnly] public DynamicComponentTypeHandle t108;
+            [ReadOnly] public DynamicComponentTypeHandle t109;
+            [ReadOnly] public DynamicComponentTypeHandle t110;
+            [ReadOnly] public DynamicComponentTypeHandle t111;
+            [ReadOnly] public DynamicComponentTypeHandle t112;
+            [ReadOnly] public DynamicComponentTypeHandle t113;
+            [ReadOnly] public DynamicComponentTypeHandle t114;
+            [ReadOnly] public DynamicComponentTypeHandle t115;
+            [ReadOnly] public DynamicComponentTypeHandle t116;
+            [ReadOnly] public DynamicComponentTypeHandle t117;
+            [ReadOnly] public DynamicComponentTypeHandle t118;
+            [ReadOnly] public DynamicComponentTypeHandle t119;
+            [ReadOnly] public DynamicComponentTypeHandle t120;
+            [ReadOnly] public DynamicComponentTypeHandle t121;
+            [ReadOnly] public DynamicComponentTypeHandle t122;
+            [ReadOnly] public DynamicComponentTypeHandle t123;
+            [ReadOnly] public DynamicComponentTypeHandle t124;
+            [ReadOnly] public DynamicComponentTypeHandle t125;
+            [ReadOnly] public DynamicComponentTypeHandle t126;
+            [ReadOnly] public DynamicComponentTypeHandle t127;
 
             // Need to accept &t0 as input, because 'fixed' must be in the callsite.
-            public unsafe ArchetypeChunkComponentTypeDynamic Type(ArchetypeChunkComponentTypeDynamic* fixedT0,
+            public unsafe DynamicComponentTypeHandle Type(DynamicComponentTypeHandle* fixedT0,
                 int typeIndex)
             {
                 return fixedT0[TypeIndexToArrayIndex[GetArrayIndex(typeIndex)]];
@@ -800,7 +807,7 @@ namespace Unity.Rendering
     }
 
     /// <summary>
-    /// Renders all Entities containing both RenderMesh & LocalToWorld components.
+    /// Renders all Entities containing both RenderMesh and LocalToWorld components.
     /// </summary>
 #if ENABLE_HYBRID_RENDERER_V2
     [ExecuteAlways]
@@ -813,6 +820,9 @@ namespace Unity.Rendering
 #endif
     public unsafe class HybridRendererSystem : JobComponentSystem
     {
+        private HybridRendererSettings m_Settings;
+        private ulong m_PersistentInstanceDataSize;
+
         private EntityQuery m_CullingJobDependencyGroup;
         private EntityQuery m_CullingGroup;
         private EntityQuery m_MissingHybridChunkInfo;
@@ -838,7 +848,6 @@ namespace Unity.Rendering
         const int kNumGatheredIndicesPerThread = 128 * 8; // Two cache lines per thread
         const int kBuiltinCbufferIndex = 0;
 
-        const int kMaxGPUPersistentInstanceDataSize = 1024 * 1024 * 64; // 64 MB
         const int kMaxChunkMetadata = 256 * 1024;
 
         private enum BatchFlags
@@ -918,14 +927,16 @@ namespace Unity.Rendering
         struct MaterialPropertyType
         {
             public int TypeIndex;
-            public int SizeBytes;
+            public short SizeBytesCPU;
+            public short SizeBytesGPU;
             public bool OverriddenDefault;
         };
 
         struct PropertyMapping
         {
             public string Name;
-            public int Size;
+            public short SizeCPU;
+            public short SizeGPU;
             public MaterialPropertyDefaultValue DefaultValue;
         }
 
@@ -980,21 +991,21 @@ namespace Unity.Rendering
         private class BatchCreateInfoFactory
         {
             public EntityManager EntityManager;
-            public ArchetypeChunkSharedComponentType<RenderMesh> RenderMeshType;
-            public ArchetypeChunkSharedComponentType<EditorRenderData> EditorRenderDataType;
-            public ArchetypeChunkComponentType<RenderMeshFlippedWindingTag> RenderMeshFlippedWindingTagType;
+            public SharedComponentTypeHandle<RenderMesh> RenderMeshTypeHandle;
+            public SharedComponentTypeHandle<EditorRenderData> EditorRenderDataTypeHandle;
+            public ComponentTypeHandle<RenderMeshFlippedWindingTag> RenderMeshFlippedWindingTagTypeHandle;
             public EditorRenderData DefaultEditorRenderData;
 
             public BatchCreateInfo CreateInfoForChunk(ArchetypeChunk chunk)
             {
                 return new BatchCreateInfo
                 {
-                    RenderMesh = chunk.GetSharedComponentData(RenderMeshType, EntityManager),
-                    EditorRenderData = chunk.Has(EditorRenderDataType)
-                        ? chunk.GetSharedComponentData(EditorRenderDataType, EntityManager)
+                    RenderMesh = chunk.GetSharedComponentData(RenderMeshTypeHandle, EntityManager),
+                    EditorRenderData = chunk.Has(EditorRenderDataTypeHandle)
+                        ? chunk.GetSharedComponentData(EditorRenderDataTypeHandle, EntityManager)
                         : DefaultEditorRenderData,
                     Bounds = BatchCreateInfo.BigBounds,
-                    FlippedWinding = chunk.Has(RenderMeshFlippedWindingTagType),
+                    FlippedWinding = chunk.Has(RenderMeshFlippedWindingTagTypeHandle),
                 };
             }
         }
@@ -1046,7 +1057,8 @@ namespace Unity.Rendering
             internal struct BatchProperty
             {
                 public int MetadataOffset;
-                public int SizeBytes;
+                public short SizeBytesCPU;
+                public short SizeBytesGPU;
                 public int CbufferIndex;
                 public int OverrideComponentsIndex;
 #if USE_PROPERTY_ASSERTS
@@ -1083,6 +1095,9 @@ namespace Unity.Rendering
 
         protected override void OnCreate()
         {
+            m_Settings = HybridRendererSettings.GetOrCreateSettings();
+            m_PersistentInstanceDataSize = m_Settings.PersistentGpuMemoryBytes;
+
             //@TODO: Support SetFilter with EntityQueryDesc syntax
             // This component group must include all types that are being used by the culling job
             m_CullingJobDependencyGroup = GetEntityQuery(
@@ -1160,7 +1175,7 @@ namespace Unity.Rendering
                 NativeArrayOptions.UninitializedMemory);
             m_ResetLod = true;
 
-            m_GPUPersistentAllocator = new HeapAllocator(kMaxGPUPersistentInstanceDataSize, 16);
+            m_GPUPersistentAllocator = new HeapAllocator(m_PersistentInstanceDataSize, 16);
             m_ChunkMetadataAllocator = new HeapAllocator(kMaxChunkMetadata);
 
             m_BatchInfos = new NativeArray<BatchInfo>(kMaxBatchCount, Allocator.Persistent);
@@ -1212,8 +1227,13 @@ namespace Unity.Rendering
             m_MaterialPropertyDefaultValues = new Dictionary<int, float4x4>();
 
             // Some hardcoded mappings to avoid dependencies to Hybrid from DOTS
-            RegisterMaterialPropertyType<LocalToWorld>("unity_ObjectToWorld");
-            RegisterMaterialPropertyType<WorldToLocal_Tag>("unity_WorldToObject", overrideTypeSize: 4 * 4 * 4);
+#if SRP_10_0_0_OR_NEWER
+            RegisterMaterialPropertyType<LocalToWorld>("unity_ObjectToWorld", 4 * 4 * 3);
+            RegisterMaterialPropertyType<WorldToLocal_Tag>("unity_WorldToObject", overrideTypeSizeGPU: 4 * 4 * 3);
+#else
+            RegisterMaterialPropertyType<LocalToWorld>("unity_ObjectToWorld", 4 * 4 * 4);
+            RegisterMaterialPropertyType<WorldToLocal_Tag>("unity_WorldToObject", 4 * 4 * 4);
+#endif
 
             // Ifdef guard registering types that might not exist if V2 is disabled.
 #if ENABLE_HYBRID_RENDERER_V2
@@ -1232,13 +1252,13 @@ namespace Unity.Rendering
                     if (attributes.Length > 0)
                     {
                         var propertyAttr = (MaterialPropertyAttribute)attributes[0];
-                        RegisterMaterialPropertyType(type, propertyAttr.Name, propertyAttr.OverrideSize);
+                        RegisterMaterialPropertyType(type, propertyAttr.Name, propertyAttr.OverrideSizeGPU);
                     }
                 }
             }
 
             m_GPUPersistentInstanceData = new ComputeBuffer(
-                kMaxGPUPersistentInstanceDataSize / 4,
+                (int)m_PersistentInstanceDataSize / 4,
                 4,
                 ComputeBufferType.Raw);
             m_GPUUploader = new SparseUploader(m_GPUPersistentInstanceData);
@@ -1246,36 +1266,39 @@ namespace Unity.Rendering
             m_FirstFrameAfterInit = true;
         }
 
-        public static void RegisterMaterialPropertyType(Type type, string propertyName, int overrideTypeSize = -1, MaterialPropertyDefaultValue defaultValue = default)
+        public static void RegisterMaterialPropertyType(Type type, string propertyName, short overrideTypeSizeGPU = -1, MaterialPropertyDefaultValue defaultValue = default)
         {
             Debug.Assert(type != null, "type must be non-null");
             Debug.Assert(!string.IsNullOrEmpty(propertyName), "Property name must be valid");
 
-            if (overrideTypeSize == -1)
-                overrideTypeSize = UnsafeUtility.SizeOf(type);
+            short typeSizeCPU = (short)UnsafeUtility.SizeOf(type);
+            if (overrideTypeSizeGPU == -1)
+                overrideTypeSizeGPU = typeSizeCPU;
 
             // For now, we only support overriding one material property with one type.
             // Several types can override one property, but not the other way around.
             // If necessary, this restriction can be lifted in the future.
             if (s_TypeToPropertyMappings.ContainsKey(type))
             {
-                Debug.Assert(s_TypeToPropertyMappings[type].Equals(propertyName),
-                    "Attempted to register same type with multiple different property names");
+                string prevPropertyName = s_TypeToPropertyMappings[type].Name;
+                Debug.Assert(propertyName.Equals(prevPropertyName),
+                    $"Attempted to register type {type.Name} with multiple different property names. Registered with \"{propertyName}\", previously registered with \"{prevPropertyName}\".");
             }
             else
             {
                 var pm = new PropertyMapping();
                 pm.Name = propertyName;
-                pm.Size = overrideTypeSize;
+                pm.SizeCPU = typeSizeCPU;
+                pm.SizeGPU = overrideTypeSizeGPU;
                 pm.DefaultValue = defaultValue;
                 s_TypeToPropertyMappings[type] = pm;
             }
         }
 
-        public static void RegisterMaterialPropertyType<T>(string propertyName, int overrideTypeSize = -1, MaterialPropertyDefaultValue defaultValue = default)
+        public static void RegisterMaterialPropertyType<T>(string propertyName, short overrideTypeSizeGPU = -1, MaterialPropertyDefaultValue defaultValue = default)
             where T : IComponentData
         {
-            RegisterMaterialPropertyType(typeof(T), propertyName, overrideTypeSize, defaultValue);
+            RegisterMaterialPropertyType(typeof(T), propertyName, overrideTypeSizeGPU, defaultValue);
         }
 
         private void InitializeMaterialProperties()
@@ -1288,7 +1311,8 @@ namespace Unity.Rendering
                 Type type = kv.Key;
                 string propertyName = kv.Value.Name;
 
-                int sizeBytes = kv.Value.Size;
+                short sizeBytesCPU = kv.Value.SizeCPU;
+                short sizeBytesGPU = kv.Value.SizeGPU;
                 int typeIndex = TypeManager.GetTypeIndex(type);
                 int nameID = Shader.PropertyToID(propertyName);
                 var defaultValue = kv.Value.DefaultValue;
@@ -1297,7 +1321,8 @@ namespace Unity.Rendering
                     new MaterialPropertyType
                     {
                         TypeIndex = typeIndex,
-                        SizeBytes = sizeBytes,
+                        SizeBytesCPU = sizeBytesCPU,
+                        SizeBytesGPU = sizeBytesGPU,
                         OverriddenDefault = defaultValue.Nonzero,
                     });
 
@@ -1343,9 +1368,22 @@ namespace Unity.Rendering
                 uint reflectionVersionNumber = 0;
                 bool reflectionChanged = false;
 #endif
+                bool gpuSizeChanged = (m_Settings.PersistentGpuMemoryBytes != m_PersistentInstanceDataSize);
+                if (gpuSizeChanged)
+                {
+                    m_PersistentInstanceDataSize = m_Settings.PersistentGpuMemoryBytes;
+                    m_GPUPersistentInstanceData.Dispose();
+                    m_GPUPersistentInstanceData = new ComputeBuffer(
+                        (int)m_PersistentInstanceDataSize / 4,
+                        4,
+                        ComputeBufferType.Raw);
+                    m_GPUUploader.ReplaceBuffer(m_GPUPersistentInstanceData);
+                    m_GPUUploader.ReleaseAllUploadBuffers();
+                }
 
                 if (HybridEditorTools.DebugSettings.RecreateAllBatches ||
-                    reflectionChanged)
+                    reflectionChanged ||
+                    gpuSizeChanged)
                 {
                     EntityManager.RemoveChunkComponentData<HybridChunkInfo>(m_HybridRenderedQuery);
 
@@ -1448,7 +1486,7 @@ namespace Unity.Rendering
 
         internal int AllocateInternalId()
         {
-            Debug.Assert(m_InternalIdFreelist.Length > 0, $"Maximum Hybrid Renderer batch count ({kMaxBatchCount}) exceeded.");
+            if (!(m_InternalIdFreelist.Length > 0)) Debug.Assert(false, $"Maximum Hybrid Renderer batch count ({kMaxBatchCount}) exceeded.");
             int id = m_InternalIdFreelist[m_InternalIdFreelist.Length - 1];
             m_InternalIdFreelist.Resize(m_InternalIdFreelist.Length - 1, NativeArrayOptions.UninitializedMemory);
             Debug.Assert(!m_SortedInternalIds.Contains(id), "Freshly allocated batch id found in list of used ids");
@@ -1458,8 +1496,8 @@ namespace Unity.Rendering
 
         internal void ReleaseInternalId(int id)
         {
-            Debug.Assert(id >= 0 && id < m_InternalToExternalIds.Length, $"Attempted to release invalid batch id {id}");
-            Debug.Assert(m_SortedInternalIds.Contains(id), $"Attempted to release an unused id {id}");
+            if (!(id >= 0 && id < m_InternalToExternalIds.Length)) Debug.Assert(false, $"Attempted to release invalid batch id {id}");
+            if (!m_SortedInternalIds.Contains(id)) Debug.Assert(false, $"Attempted to release an unused id {id}");
             m_SortedInternalIds.Remove(id);
             m_InternalIdFreelist.Add(id);
         }
@@ -1501,7 +1539,7 @@ namespace Unity.Rendering
 
         internal void RemoveBatchIndex(int internalId, int externalId)
         {
-            Debug.Assert(m_ExternalBatchCount > 0, $"Attempted to release an invalid BatchRendererGroup id {externalId}");
+            if (!(m_ExternalBatchCount > 0)) Debug.Assert(false, $"Attempted to release an invalid BatchRendererGroup id {externalId}");
             m_ExistingBatchInternalIndices.Remove(internalId);
             RemoveExternalIdSwapWithBack(externalId);
             ReleaseInternalId(internalId);
@@ -1590,10 +1628,10 @@ namespace Unity.Rendering
                 {
                     ForceLowLOD = m_ForceLowLOD,
                     LODParams = lodParams,
-                    RootLodRequirements = GetArchetypeChunkComponentType<RootLodRequirement>(true),
-                    InstanceLodRequirements = GetArchetypeChunkComponentType<LodRequirement>(true),
-                    HybridChunkInfo = GetArchetypeChunkComponentType<HybridChunkInfo>(),
-                    ChunkHeader = GetArchetypeChunkComponentType<ChunkHeader>(),
+                    RootLodRequirements = GetComponentTypeHandle<RootLodRequirement>(true),
+                    InstanceLodRequirements = GetComponentTypeHandle<LodRequirement>(true),
+                    HybridChunkInfo = GetComponentTypeHandle<HybridChunkInfo>(),
+                    ChunkHeader = GetComponentTypeHandle<ChunkHeader>(),
                     CameraMoveDistanceFixed16 =
                         Fixed16CamDistance.FromFloatCeil(cameraMoveDistance * lodParams.distanceScale),
                     DistanceScale = lodParams.distanceScale,
@@ -1639,10 +1677,10 @@ namespace Unity.Rendering
             {
                 Planes = planes,
                 InternalToExternalRemappingTable = m_InternalToExternalIds,
-                HybridChunkInfo = GetArchetypeChunkComponentType<HybridChunkInfo>(),
-                ChunkHeader = GetArchetypeChunkComponentType<ChunkHeader>(true),
-                ChunkWorldRenderBounds = GetArchetypeChunkComponentType<ChunkWorldRenderBounds>(true),
-                BoundsComponent = GetArchetypeChunkComponentType<WorldRenderBounds>(true),
+                HybridChunkInfo = GetComponentTypeHandle<HybridChunkInfo>(),
+                ChunkHeader = GetComponentTypeHandle<ChunkHeader>(true),
+                ChunkWorldRenderBounds = GetComponentTypeHandle<ChunkWorldRenderBounds>(true),
+                BoundsComponent = GetComponentTypeHandle<WorldRenderBounds>(true),
                 IndexList = cullingContext.visibleIndices,
                 Batches = cullingContext.batchVisibility,
                 ThreadLocalIndexLists = threadLocalIndexLists,
@@ -1682,7 +1720,7 @@ namespace Unity.Rendering
 
             Profiler.BeginSample("GetComponentTypes");
             var hybridRenderedChunkType =
-                GetArchetypeChunkComponentType<HybridChunkInfo>();
+                GetComponentTypeHandle<HybridChunkInfo>();
             m_ComponentTypeCache.FetchTypeHandles(this);
             Profiler.EndSample();
 
@@ -1762,10 +1800,10 @@ namespace Unity.Rendering
 
             var updateAllJob = new UpdateAllHybridChunksJob
             {
-                HybridChunkInfo = GetArchetypeChunkComponentType<HybridChunkInfo>(false),
-                ChunkWorldRenderBounds = GetArchetypeChunkComponentType<ChunkWorldRenderBounds>(true),
-                ChunkHeader = GetArchetypeChunkComponentType<ChunkHeader>(true),
-                LocalToWorld = GetArchetypeChunkComponentType<LocalToWorld>(true),
+                HybridChunkInfo = GetComponentTypeHandle<HybridChunkInfo>(false),
+                ChunkWorldRenderBounds = GetComponentTypeHandle<ChunkWorldRenderBounds>(true),
+                ChunkHeader = GetComponentTypeHandle<ChunkHeader>(true),
+                LocalToWorld = GetComponentTypeHandle<LocalToWorld>(true),
                 HybridChunkUpdater = hybridChunkUpdater,
             };
 
@@ -1788,8 +1826,8 @@ namespace Unity.Rendering
                 var updateNewChunksJob = new UpdateNewHybridChunksJob
                 {
                     NewChunks = newChunks,
-                    HybridChunkInfo = GetArchetypeChunkComponentType<HybridChunkInfo>(false),
-                    ChunkWorldRenderBounds = GetArchetypeChunkComponentType<ChunkWorldRenderBounds>(true),
+                    HybridChunkInfo = GetComponentTypeHandle<HybridChunkInfo>(false),
+                    ChunkWorldRenderBounds = GetComponentTypeHandle<ChunkWorldRenderBounds>(true),
                     HybridChunkUpdater = hybridChunkUpdater,
                 };
 
@@ -2032,15 +2070,15 @@ namespace Unity.Rendering
 
             Debug.Assert(newChunks.Length > 0, "Attempted to add new chunks, but list of new chunks was empty");
 
-            var hybridChunkInfoType = GetArchetypeChunkComponentType<HybridChunkInfo>();
+            var hybridChunkInfoType = GetComponentTypeHandle<HybridChunkInfo>();
             // Sort new chunks by RenderMesh so we can put
             // all compatible chunks inside one batch.
             var batchCreateInfoFactory = new BatchCreateInfoFactory
             {
                 EntityManager = EntityManager,
-                RenderMeshType = GetArchetypeChunkSharedComponentType<RenderMesh>(),
-                EditorRenderDataType = GetArchetypeChunkSharedComponentType<EditorRenderData>(),
-                RenderMeshFlippedWindingTagType = GetArchetypeChunkComponentType<RenderMeshFlippedWindingTag>(),
+                RenderMeshTypeHandle = GetSharedComponentTypeHandle<RenderMesh>(),
+                EditorRenderDataTypeHandle = GetSharedComponentTypeHandle<EditorRenderData>(),
+                RenderMeshFlippedWindingTagTypeHandle = GetComponentTypeHandle<RenderMeshFlippedWindingTag>(),
 #if UNITY_EDITOR
                 DefaultEditorRenderData = new EditorRenderData
                 {SceneCullingMask = UnityEditor.SceneManagement.EditorSceneManager.DefaultSceneCullingMask},
@@ -2152,11 +2190,13 @@ namespace Unity.Rendering
 
                 int overridesStartIndex = -1;
 
+                short sizeCPU = 0;
                 while (foundMaterialPropertyType)
                 {
                     // There can be multiple components that override some particular NameID, so add
                     // entries for all of them.
-                    if (materialPropertyType.SizeBytes == shaderProperty.SizeBytes)
+                    if (materialPropertyType.SizeBytesGPU == shaderProperty.SizeBytes
+                        || materialPropertyType.SizeBytesCPU == shaderProperty.SizeBytes) // TODO: hack to work around the property being the real size after load
                     {
                         if (overridesStartIndex < 0)
                             overridesStartIndex = overrideComponents.Length;
@@ -2166,6 +2206,8 @@ namespace Unity.Rendering
                             BatchPropertyIndex = i,
                             TypeIndex = materialPropertyType.TypeIndex,
                         });
+
+                        sizeCPU = materialPropertyType.SizeBytesCPU;
 
                         // We cannot ask default values for builtins from the material, that causes errors.
                         // Instead, check whether one was registered manually when the overriding type
@@ -2181,7 +2223,7 @@ namespace Unity.Rendering
                     {
 #if USE_PROPERTY_ASSERTS
                         Debug.Log(
-                            $"Shader expects property \"{m_MaterialPropertyNames[nameID]}\" to have size {shaderProperty.SizeBytes}, but overriding component \"{m_MaterialPropertyTypeNames[materialPropertyType.TypeIndex]}\" has size {materialPropertyType.SizeBytes} instead.");
+                            $"Shader expects property \"{m_MaterialPropertyNames[nameID]}\" to have size {shaderProperty.SizeBytes}, but overriding component \"{m_MaterialPropertyTypeNames[materialPropertyType.TypeIndex]}\" has size {materialPropertyType.SizeBytesGPU} instead.");
 #endif
                     }
 
@@ -2200,7 +2242,8 @@ namespace Unity.Rendering
                 properties.Add(new BatchInfo.BatchProperty
                 {
                     MetadataOffset = shaderProperty.MetadataOffset,
-                    SizeBytes = shaderProperty.SizeBytes,
+                    SizeBytesCPU = sizeCPU,
+                    SizeBytesGPU = (short)shaderProperty.SizeBytes,
                     CbufferIndex = shaderProperty.CbufferIndex,
                     OverrideComponentsIndex = overridesStartIndex,
                     OverriddenInBatch = false,
@@ -2240,9 +2283,13 @@ namespace Unity.Rendering
                 bool needsDedicatedAllocation = property->OverriddenInBatch || !property->ZeroDefaultValue;
                 if (needsDedicatedAllocation)
                 {
-                    uint sizeBytes = (uint)numInstances * (uint)property->SizeBytes;
+                    // If the property is not overridden, we only need space for a single element, the default value.
+                    uint sizeBytes = property->OverriddenInBatch
+                        ? ((uint)numInstances * (uint)property->SizeBytesGPU)
+                        : (uint)property->SizeBytesGPU;
+
                     property->GPUAllocation = m_GPUPersistentAllocator.Allocate(sizeBytes);
-                    Debug.Assert(!property->GPUAllocation.Empty, $"Out of memory in the Hybrid Renderer GPU instance data buffer. Attempted to allocate {sizeBytes}, buffer size: {m_GPUPersistentAllocator.Size}, free size left: {m_GPUPersistentAllocator.FreeSpace}.");
+                    if (property->GPUAllocation.Empty) Debug.Assert(false, $"Out of memory in the Hybrid Renderer GPU instance data buffer. Attempted to allocate {sizeBytes}, buffer size: {m_GPUPersistentAllocator.Size}, free size left: {m_GPUPersistentAllocator.FreeSpace}.");
                 }
             }
 #endif
@@ -2323,12 +2370,15 @@ namespace Unity.Rendering
 
                 prevPropertyIndex = propertyIndex;
 
-                Debug.Assert(!property->GPUAllocation.Empty,
+                if (property->GPUAllocation.Empty)
+                {
+                    Debug.Assert(false,
 #if USE_PROPERTY_ASSERTS
-                    $"No valid GPU instance data buffer allocation for property {m_MaterialPropertyNames[property->NameID]}");
+                        $"No valid GPU instance data buffer allocation for property {m_MaterialPropertyNames[property->NameID]}");
 #else
-                    "No valid GPU instance data buffer allocation for property");
+                        "No valid GPU instance data buffer allocation for property");
 #endif
+                }
 
                 int typeIndex = componentType->TypeIndex;
                 var type = m_ComponentTypeCache.Type(typeIndex);
@@ -2339,14 +2389,15 @@ namespace Unity.Rendering
                     // well defined and we ignore all but one of them and possibly issue an error.
                     if (numOverridesForProperty == 0)
                     {
-                        uint sizeBytes = (uint)property->SizeBytes;
+                        uint sizeBytes = (uint)property->SizeBytesGPU;
                         uint batchBeginOffset = (uint)property->GPUAllocation.begin;
                         uint chunkBeginOffset = batchBeginOffset + (uint)chunkStart * sizeBytes;
 
                         overriddenProperties.Add(new ChunkProperty
                         {
                             ComponentTypeIndex = typeIndex,
-                            ValueSizeBytes = property->SizeBytes,
+                            ValueSizeBytesCPU = property->SizeBytesCPU,
+                            ValueSizeBytesGPU = property->SizeBytesGPU,
                             GPUDataBegin = (int)chunkBeginOffset,
                         });
 
@@ -2372,7 +2423,7 @@ namespace Unity.Rendering
         }
 
         private bool AddNewBatch(ref BatchCreateInfo createInfo,
-            ref ArchetypeChunkComponentType<HybridChunkInfo> hybridChunkInfoType,
+            ref ComponentTypeHandle<HybridChunkInfo> hybridChunkInfoTypeHandle,
             NativeArray<ArchetypeChunk> batchChunks,
             int numInstances)
         {
@@ -2419,9 +2470,9 @@ namespace Unity.Rendering
 
             CullingComponentTypes batchCullingComponentTypes = new CullingComponentTypes
             {
-                RootLodRequirements = GetArchetypeChunkComponentType<RootLodRequirement>(true),
-                InstanceLodRequirements = GetArchetypeChunkComponentType<LodRequirement>(true),
-                PerInstanceCullingTag = GetArchetypeChunkComponentType<PerInstanceCullingTag>(true)
+                RootLodRequirements = GetComponentTypeHandle<RootLodRequirement>(true),
+                InstanceLodRequirements = GetComponentTypeHandle<LodRequirement>(true),
+                PerInstanceCullingTag = GetComponentTypeHandle<PerInstanceCullingTag>(true)
             };
 
             ref var metadataAllocations = ref batchInfo.ChunkMetadataAllocations;
@@ -2457,7 +2508,7 @@ namespace Unity.Rendering
                         overriddenProperties.Length * sizeof(ChunkProperty));
                 }
 
-                chunk.SetChunkComponentData(hybridChunkInfoType, chunkInfo);
+                chunk.SetChunkComponentData(hybridChunkInfoTypeHandle, chunkInfo);
 
 #if DEBUG_LOG_CHUNKS
                 Debug.Log($"AddChunk(chunk: {chunk.Count}, chunkStart: {chunkStart}, overriddenProperties: {overriddenProperties.Length})");
@@ -2575,7 +2626,7 @@ namespace Unity.Rendering
                 if (property->ZeroDefaultValue)
                     continue;
 
-                uint sizeBytes = (uint)property->SizeBytes;
+                uint sizeBytes = (uint)property->SizeBytesGPU;
                 uint batchBeginOffset = (uint)property->GPUAllocation.begin;
 
                 m_DefaultValueBlits.Add(new DefaultValueBlitDescriptor
@@ -2607,12 +2658,16 @@ namespace Unity.Rendering
                 int overrideIndex = property->OverrideComponentsIndex;
                 bool isOverridden = false;
 
-                Debug.Assert(!property->GPUAllocation.Empty,
+                if (property->GPUAllocation.Empty)
+                {
+                    Debug.Assert(false,
 #if USE_PROPERTY_ASSERTS
-                    $"No valid GPU instance data buffer allocation for property {m_MaterialPropertyNames[property->NameID]}");
+                        $"No valid GPU instance data buffer allocation for property {m_MaterialPropertyNames[property->NameID]}");
 #else
-                    "No valid GPU instance data buffer allocation for property");
+                        "No valid GPU instance data buffer allocation for property");
 #endif
+                }
+
                 Debug.Assert(overrideIndex >= 0, "Expected a valid array index");
 
                 while (overrideIndex < overrideComponents.Length)
@@ -2643,7 +2698,7 @@ namespace Unity.Rendering
                     Debug.Log($"Property {m_MaterialPropertyNames[property->NameID]} NOT overridden in chunk, uploading default");
 #endif
 
-                    uint sizeBytes = (uint)property->SizeBytes;
+                    uint sizeBytes = (uint)property->SizeBytesGPU;
                     uint batchBeginOffset = (uint)property->GPUAllocation.begin;
                     uint chunkBeginOffset = (uint)chunkStart * sizeBytes;
 
@@ -2660,9 +2715,9 @@ namespace Unity.Rendering
 
         private struct CullingComponentTypes
         {
-            public ArchetypeChunkComponentType<RootLodRequirement> RootLodRequirements;
-            public ArchetypeChunkComponentType<LodRequirement> InstanceLodRequirements;
-            public ArchetypeChunkComponentType<PerInstanceCullingTag> PerInstanceCullingTag;
+            public ComponentTypeHandle<RootLodRequirement> RootLodRequirements;
+            public ComponentTypeHandle<LodRequirement> InstanceLodRequirements;
+            public ComponentTypeHandle<PerInstanceCullingTag> PerInstanceCullingTag;
         }
 
         private struct DefaultValueBlitDescriptor
@@ -2754,7 +2809,7 @@ namespace Unity.Rendering
         public void StartUpdate()
         {
             m_ThreadedGPUUploader =
-                m_GPUUploader.Begin(kMaxGPUPersistentInstanceDataSize, kMaxGPUPersistentInstanceDataSize / 24);
+                m_GPUUploader.Begin((int)m_PersistentInstanceDataSize, (int)m_PersistentInstanceDataSize / 24);
             // Debug.Log($"GPU allocator: {(double)m_GPUPersistentAllocator.UsedSpace / (double)m_GPUPersistentAllocator.Size * 100.0}%");
         }
 

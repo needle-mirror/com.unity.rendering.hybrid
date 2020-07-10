@@ -1,0 +1,40 @@
+#pragma kernel InstantiateDeformationDataKernel
+
+#define NBR_THREAD_GROUPS 1024
+
+#define NBR_THREADS_X 128
+#define NBR_THREADS_Y 1
+#define NBR_THREADS_Z 1
+
+#define THREAD_COUNT NBR_THREADS_Y * NBR_THREADS_X * NBR_THREADS_Z
+#define STEP_SIZE THREAD_COUNT * NBR_THREAD_GROUPS
+
+struct VertexData
+{
+	float3 Position;
+	float3 Normal;
+	float3 Tangent;
+};
+
+uniform StructuredBuffer<VertexData>	_SharedMeshData : register(t1);
+uniform RWStructuredBuffer<VertexData>	_DeformedMeshData : register(u1);
+
+uint g_VertexCount;
+uint g_SharedMeshStartIndex;
+uint g_DeformedMeshStartIndex;
+uint g_InstanceCount;
+
+[numthreads(NBR_THREADS_X, NBR_THREADS_Y, NBR_THREADS_Z)]
+void InstantiateDeformationDataKernel(uint id : SV_GroupIndex, uint3 groupId : SV_GroupID)
+{
+	const uint totalNumVertices = g_VertexCount * g_InstanceCount;
+	const uint start = id + groupId[0] * THREAD_COUNT;
+
+	for (uint i = start; i < totalNumVertices; i += STEP_SIZE)
+	{
+		const uint sharedMeshVertexIndex = g_SharedMeshStartIndex + (i % g_VertexCount);
+		const uint deformedMeshVertexIndex = g_DeformedMeshStartIndex + i;
+
+		_DeformedMeshData[deformedMeshVertexIndex] = _SharedMeshData[sharedMeshVertexIndex];
+	}
+}
