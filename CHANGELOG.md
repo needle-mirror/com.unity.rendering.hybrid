@@ -1,22 +1,35 @@
-# Changelog
+# Change log
 
-## [0.7.0] - 2020-07-10
+## [0.8.0] - 2020-08-04
 
-### Added
-
-* Added support for controling persistent GPU buffer sizes through the Project Settings
 
 ### Changed
 
-* Updated minimum Unity Editor version to 2020.1.0b15 (40d9420e7de8)
 * Changed SkinnedMeshRendererConversion to take the RootBone into account. The render entities are now parented to the RootBone entity instead of the SkinnedMeshRenderer GameObject entity. As a result the RenderBounds will update correctly when the root bone is transformed. 
 * Changed SkinnedMeshRendererConversion to compute the SkinMatrices in SkinnedMeshRenderer's root bone space instead of worldspace.
 
 ### Fixed
 
-* Improved hashing of the RenderMesh component.
-* Fixed an issue where blendshapes were applied with incorrect weights when the blendshapes were sparse.
+* Fixed the Hybrid V2 uploading code not supporting more than 65535 separate upload operations per frame.
 * Fixed render bounds being offset on converted SkinnedMeshRenderers.
+* Partially fixed editor picking for Hybrid V2. Picking should now work in simple cases.
+
+
+
+## [0.7.0] - 2020-07-10
+
+### Added
+
+* Added support for controling persistent GPU buffer sizes through project settings
+
+### Changed
+
+* Updated minimum Unity Editor version to 2020.1.0b15 (40d9420e7de8)
+
+### Fixed
+
+* Improved hashing of the RenderMesh component.
+* Fixed blendshapes getting applied with incorrect weights when the blendshapes are sparse.
 
 ### Known Issues
 

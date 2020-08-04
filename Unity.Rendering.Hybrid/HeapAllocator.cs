@@ -403,7 +403,7 @@ namespace Unity.Rendering
                 if (math.min(endpoint, otherEnd) == block.begin &&
                     math.max(endpoint, otherEnd) == block.end)
                 {
-                    UnityEngine.Debug.Log("kek");
+                    UnityEngine.Debug.Log("Inconsistent free block endpoint data");
                 }
                 Assert.IsFalse(
                     math.min(endpoint, otherEnd) == block.begin &&

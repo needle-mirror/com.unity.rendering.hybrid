@@ -12,8 +12,13 @@
 // #define DEBUG_LOG_VISIBLE_INSTANCES
 // #define DEBUG_LOG_MATERIAL_PROPERTIES
 // #define PROFILE_BURST_JOB_INTERNALS
+
 #if UNITY_EDITOR || DEBUG_LOG_OVERRIDES
 #define USE_PROPERTY_ASSERTS
+#endif
+
+#if UNITY_EDITOR
+#define USE_PICKING_MATRICES
 #endif
 
 // Assert that V2 requirements are met if it's enabled
@@ -233,7 +238,6 @@ namespace Unity.Rendering
         public NativeArray<long> UnreferencedInternalIndices;
         public NativeArray<long> BatchRequiresUpdates;
         public NativeArray<long> BatchHadMovingEntities;
-
         public NativeArray<ArchetypeChunk> NewChunks;
         public NativeArray<int> NumNewChunks;
 
@@ -248,6 +252,12 @@ namespace Unity.Rendering
         [NativeDisableParallelForRestriction]
         public NativeArray<float> BatchAABBs;
         public MinMaxAABB ThreadLocalAABB;
+
+#if USE_PICKING_MATRICES
+        [NativeDisableParallelForRestriction]
+        [ReadOnly]
+        public NativeArray<IntPtr> BatchPickingMatrices;
+#endif
 
         public uint LastSystemVersion;
         public int PreviousBatchIndex;
@@ -389,6 +399,22 @@ namespace Unity.Rendering
                                 (chunkProperty.ValueSizeBytesGPU == 4 * 4 * 3)
                                 ? ThreadedSparseUploader.MatrixType.MatrixType3x4
                                 : ThreadedSparseUploader.MatrixType.MatrixType4x4);
+
+#if USE_PICKING_MATRICES
+                            // If picking support is enabled, also copy the LocalToWorld matrices
+                            // to the traditional instancing matrix array. This should be thread safe
+                            // because the related Burst jobs run during DOTS system execution, and
+                            // are guaranteed to have finished before rendering starts.
+                            if (isLocalToWorld)
+                            {
+                                float4x4* batchPickingMatrices = (float4x4*)BatchPickingMatrices[internalIndex];
+                                int chunkOffsetInBatch = chunkInfo.CullingData.BatchOffset;
+                                UnsafeUtility.MemCpy(
+                                    batchPickingMatrices + chunkOffsetInBatch,
+                                    srcPtr,
+                                    sizeBytes);
+                            }
+#endif
                         }
                         else
                         {
@@ -869,6 +895,9 @@ namespace Unity.Rendering
 
         private NativeArray<BatchInfo> m_BatchInfos;
         private NativeArray<BatchMotionInfo> m_BatchMotionInfos;
+#if USE_PICKING_MATRICES
+        private NativeArray<IntPtr> m_BatchPickingMatrices;
+#endif
         private NativeArray<ChunkProperty> m_ChunkProperties;
         private NativeHashMap<int, int> m_ExistingBatchInternalIndices;
         private ComponentTypeCache m_ComponentTypeCache;
@@ -1180,6 +1209,9 @@ namespace Unity.Rendering
 
             m_BatchInfos = new NativeArray<BatchInfo>(kMaxBatchCount, Allocator.Persistent);
             m_BatchMotionInfos = new NativeArray<BatchMotionInfo>(kMaxBatchCount, Allocator.Persistent);
+#if USE_PICKING_MATRICES
+            m_BatchPickingMatrices = new NativeArray<IntPtr>(kMaxBatchCount, Allocator.Persistent);
+#endif
             m_ChunkProperties = new NativeArray<ChunkProperty>(kMaxChunkMetadata, Allocator.Persistent);
             m_ExistingBatchInternalIndices = new NativeHashMap<int, int>(128, Allocator.Persistent);
             m_ComponentTypeCache = new ComponentTypeCache(128);
@@ -1568,6 +1600,9 @@ namespace Unity.Rendering
 
             m_BatchInfos.Dispose();
             m_BatchMotionInfos.Dispose();
+#if USE_PICKING_MATRICES
+            m_BatchPickingMatrices.Dispose();
+#endif
             m_ChunkProperties.Dispose();
             m_ExistingBatchInternalIndices.Dispose();
             m_DefaultValueBlits.Dispose();
@@ -1795,6 +1830,9 @@ namespace Unity.Rendering
 
 #if PROFILE_BURST_JOB_INTERNALS
                 ProfileAddUpload = new ProfilerMarker("AddUpload"),
+#endif
+#if USE_PICKING_MATRICES
+                BatchPickingMatrices = m_BatchPickingMatrices,
 #endif
             };
 
@@ -2032,6 +2070,10 @@ namespace Unity.Rendering
             var batchInfo = m_BatchInfos[internalBatchIndex];
             m_BatchInfos[internalBatchIndex] = default;
             m_BatchMotionInfos[internalBatchIndex] = default;
+
+#if USE_PICKING_MATRICES
+            m_BatchPickingMatrices[internalBatchIndex] = IntPtr.Zero;
+#endif
 
 #if DEBUG_LOG_BATCHES
             Debug.Log($"RemoveBatch(internalBatchIndex: {internalBatchIndex}, externalBatchIndex: {externalBatchIndex})");
@@ -2443,9 +2485,7 @@ namespace Unity.Rendering
                 createInfo.Bounds,
                 numInstances,
                 null,
-                null,
-                // TODO: This should probably be implemented at some point?
-                // createInfo.EditorRenderData.PickableObject,
+                createInfo.EditorRenderData.PickableObject,
                 createInfo.EditorRenderData.SceneCullingMask);
             int internalBatchIndex = AddBatchIndex(externalBatchIndex);
 
@@ -2467,6 +2507,17 @@ namespace Unity.Rendering
 
             SetBatchMetadata(externalBatchIndex, ref batchInfo, renderMesh.material);
             AddBlitsForSharedDefaults(ref batchInfo);
+
+#if USE_PICKING_MATRICES
+            // Picking currently uses a built-in shader that renders using traditional instancing,
+            // and expects matrices in an instancing array, which is how Hybrid V1 always works.
+            // To support picking, we cache a pointer into the instancing matrix array of each
+            // batch, and refresh the contents whenever the DOTS side matrices change.
+            // This approach relies on the instancing matrices being permanently allocated (i.e.
+            // not temp allocated), which is the case at the time of writing.
+            var matrixArray = m_BatchRendererGroup.GetBatchMatrices(externalBatchIndex);
+            m_BatchPickingMatrices[internalBatchIndex] = (IntPtr)matrixArray.GetUnsafePtr();
+#endif
 
             CullingComponentTypes batchCullingComponentTypes = new CullingComponentTypes
             {

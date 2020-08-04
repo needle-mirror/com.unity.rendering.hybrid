@@ -466,5 +466,35 @@ namespace Unity.Rendering.Tests
 
             Teardown();
         }
+
+#if UNITY_2020_1_OR_NEWER
+        [Test]
+#endif
+        public void HugeUploadCount()
+        {
+            const int HugeCount = 100000;
+
+            if (!SystemInfo.supportsComputeShaders)
+            {
+                Assert.Ignore("Skipped due to platform/computer not supporting compute shaders");
+                return;
+            }
+
+            var initialData = new ExampleStruct[HugeCount];
+
+            Setup(initialData);
+            var tsu = uploader.Begin(UnsafeUtility.SizeOf<ExampleStruct>() * HugeCount, HugeCount);
+            for (int i = 0; i < initialData.Length; ++i)
+                tsu.AddUpload(new ExampleStruct {someData = i}, 4 * i);
+            uploader.EndAndCommit(tsu);
+
+            var resultingData = new ExampleStruct[initialData.Length];
+            buffer.GetData(resultingData);
+
+            for (int i = 0; i < initialData.Length; ++i)
+                Assert.AreEqual(i, resultingData[i].someData, $"Index: {i}");
+
+            Teardown();
+        }
     }
 }

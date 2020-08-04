@@ -152,6 +152,8 @@ namespace Unity.Rendering
     public unsafe struct SparseUploader : IDisposable
     {
         const int k_NumBufferedFrames = 3;
+        const int k_MaxThreadGroupsPerDispatch = 65535;
+
         int m_CurrFrame;
 
         ComputeBuffer m_DestinationBuffer;
@@ -166,6 +168,11 @@ namespace Unity.Rendering
 
         ComputeShader m_SparseUploaderShader;
         int m_KernelIndex;
+
+        int m_OperationsID;
+        int m_SrcBufferID;
+        int m_DstBufferID;
+        int m_OperationsBaseID;
 
         public SparseUploader(ComputeBuffer dst)
         {
@@ -190,6 +197,11 @@ namespace Unity.Rendering
 
             m_SparseUploaderShader = Resources.Load<ComputeShader>("SparseUploader");
             m_KernelIndex = m_SparseUploaderShader.FindKernel("CopyKernel");
+
+            m_OperationsID = Shader.PropertyToID("operations");
+            m_SrcBufferID = Shader.PropertyToID("srcBuffer");
+            m_DstBufferID = Shader.PropertyToID("dstBuffer");
+            m_OperationsBaseID = Shader.PropertyToID("operationsBase");
         }
 
         public void Dispose()
@@ -276,12 +288,19 @@ namespace Unity.Rendering
             // Uncomment this to display how much data the uploader will copy.
             //Debug.Log($"SPARSE UPLOADER: uploaded {m_ThreadData->m_CurrDataOffset / (1024.0 * 1024.0)} MiB in {m_ThreadData->m_CurrOperation} operations");
 
-            if (m_ThreadData->m_CurrOperation > 0)
+            int numOps = m_ThreadData->m_CurrOperation;
+            for (int i = 0; i < numOps; i += k_MaxThreadGroupsPerDispatch)
             {
-                m_SparseUploaderShader.SetBuffer(m_KernelIndex, "operations", m_OperationsBuffer[m_CurrFrame]);
-                m_SparseUploaderShader.SetBuffer(m_KernelIndex, "srcBuffer", m_DataBuffer[m_CurrFrame]);
-                m_SparseUploaderShader.SetBuffer(m_KernelIndex, "dstBuffer", m_DestinationBuffer);
-                m_SparseUploaderShader.Dispatch(m_KernelIndex, m_ThreadData->m_CurrOperation, 1, 1);
+                int opsBegin = i;
+                int opsEnd = math.min(opsBegin + k_MaxThreadGroupsPerDispatch, numOps);
+                int numThreadGroups = opsEnd - opsBegin;
+
+                m_SparseUploaderShader.SetBuffer(m_KernelIndex, m_OperationsID, m_OperationsBuffer[m_CurrFrame]);
+                m_SparseUploaderShader.SetBuffer(m_KernelIndex, m_SrcBufferID, m_DataBuffer[m_CurrFrame]);
+                m_SparseUploaderShader.SetBuffer(m_KernelIndex, m_DstBufferID, m_DestinationBuffer);
+                m_SparseUploaderShader.SetInt(m_OperationsBaseID, opsBegin);
+
+                m_SparseUploaderShader.Dispatch(m_KernelIndex, numThreadGroups, 1, 1);
             }
 
             m_CurrFrame += 1;

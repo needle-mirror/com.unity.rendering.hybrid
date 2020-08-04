@@ -21,6 +21,9 @@ StructuredBuffer<Operation> operations;
 ByteAddressBuffer srcBuffer;
 RWByteAddressBuffer dstBuffer;
 
+// Place constants into globals so CBUFFER macros (and SRP headers) are not needed
+int operationsBase;
+
 #define GROUP_SIZE 64
 #define NUM_BYTES_PER_THREAD 4
 #define NUM_BYTES_PER_GROUP (GROUP_SIZE * NUM_BYTES_PER_THREAD)
@@ -230,7 +233,7 @@ void InverseMatricesToGPU_3x4(Operation operation, uint threadID)
 [numthreads(GROUP_SIZE, 1, 1)]
 void CopyKernel(uint threadID : SV_GroupThreadID, uint groupID : SV_GroupID)
 {
-    Operation operation = operations[groupID];
+    Operation operation = operations[operationsBase + groupID];
 
     if (operation.type == kOperationType_Upload)
         CopyToGPU(operation, threadID);
