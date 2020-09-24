@@ -1,4 +1,6 @@
+using System;
 using System.Collections.Generic;
+using System.Linq;
 using Unity.Transforms;
 using Unity.Entities;
 using Unity.Mathematics;
@@ -7,7 +9,23 @@ using UnityEngine.Rendering;
 
 namespace Unity.Rendering
 {
-    [ConverterVersion("unity", 9)]
+    [Flags]
+    public enum LightMappingFlags
+    {
+        None = 0,
+        Lightmapped = 1,
+        Directional = 2,
+        ShadowMask = 4
+    }
+
+    public struct MaterialLookupKey
+    {
+        public Material BaseMaterial;
+        public LightMaps lightmaps;
+        public LightMappingFlags Flags;
+    }
+
+    [ConverterVersion("unity", 10)]
     [WorldSystemFilter(WorldSystemFilterFlags.HybridGameObjectConversion)]
     class MeshRendererConversion : GameObjectConversionSystem
     {
@@ -15,13 +33,48 @@ namespace Unity.Rendering
 
         protected override void OnUpdate()
         {
-            var materials = new List<Material>(10);
+            var globalToLocalLightmapMap = new Dictionary<int, int>();
+#if UNITY_2020_2_OR_NEWER
+            var usedIndicies = new List<int>();
+            Entities.WithNone<TextMesh>().ForEach((MeshRenderer meshRenderer, MeshFilter meshFilter) =>
+            {
+                usedIndicies.Add(meshRenderer.lightmapIndex);
+            });
+
+            var setting = LightmapSettings.lightmaps;
+            var uniqueIndices = usedIndicies.Distinct().OrderBy(x => x).Where(x=> x >= 0 && x != 65534 && x < setting.Length).ToArray();
+
+            var colors = new List<Texture2D>();
+            var directions = new List<Texture2D>();
+            var shadowMasks = new List<Texture2D>();
+
+            for (var i = 0; i < uniqueIndices.Length; i++)
+            {
+                var index = uniqueIndices[i];
+                colors.Add(setting[index].lightmapColor);
+                directions.Add(setting[index].lightmapDir);
+                shadowMasks.Add(setting[index].shadowMask);
+                globalToLocalLightmapMap.Add(index, i);
+            }
+
+            var lightMaps = LightMaps.ConstructLightMaps(colors, directions, shadowMasks);
+#else
+            var lightMaps = new LightMaps();
+#endif
+            var sourceMaterials = new List<Material>(10);
+            var createdMaterials = new Dictionary<MaterialLookupKey, Material>();
+
             Entities.WithNone<TextMesh>().ForEach((MeshRenderer meshRenderer, MeshFilter meshFilter) =>
             {
                 var mesh = meshFilter.sharedMesh;
-                meshRenderer.GetSharedMaterials(materials);
+                meshRenderer.GetSharedMaterials(sourceMaterials);
 
-                Convert(DstEntityManager, this, AttachToPrimaryEntityForSingleMaterial, meshRenderer, mesh, materials, meshRenderer.transform, mesh.bounds.ToAABB());
+                if (!globalToLocalLightmapMap.TryGetValue(meshRenderer.lightmapIndex, out var lightmapIndex))
+                    lightmapIndex = meshRenderer.lightmapIndex;
+
+                if(mesh != null)
+                    Convert(DstEntityManager, this, AttachToPrimaryEntityForSingleMaterial, meshRenderer, mesh, sourceMaterials,
+                        createdMaterials, lightMaps, lightmapIndex, meshRenderer.transform, mesh.bounds.ToAABB());
             });
         }
 
@@ -37,15 +90,26 @@ namespace Unity.Rendering
         }
 #endif
 
+        enum StaticLightingMode
+        {
+            None = 0,
+            Lightmapped = 1,
+            LightProbes = 2,
+        }
+
+
         private static void AddComponentsToEntity(
             Entity entity,
             EntityManager dstEntityManager,
             GameObjectConversionSystem conversionSystem,
             Renderer meshRenderer,
             Mesh mesh,
-            Material material,
+            List<Material> materials,
+            Dictionary<MaterialLookupKey, Material> createdMaterials,
             bool flipWinding,
             int id,
+            LightMaps lightMaps,
+            int lightmapIndex,
             AABB localBounds)
         {
             var needMotionVectorPass = (meshRenderer.motionVectorGenerationMode == MotionVectorGenerationMode.Object) ||
@@ -54,7 +118,6 @@ namespace Unity.Rendering
             var renderMesh = new RenderMesh
             {
                 mesh = mesh,
-                material = material,
                 castShadows = meshRenderer.shadowCastingMode,
                 receiveShadows = meshRenderer.receiveShadows,
                 layer = meshRenderer.gameObject.layer,
@@ -62,10 +125,80 @@ namespace Unity.Rendering
                 needMotionVectorPass = needMotionVectorPass
             };
 
-            dstEntityManager.AddSharedComponentData(entity, renderMesh);
+            var staticLightingMode = StaticLightingMode.None;
+            if (meshRenderer.lightmapIndex >= 65534 || meshRenderer.lightmapIndex < 0)
+                staticLightingMode = StaticLightingMode.LightProbes;
+            else if (meshRenderer.lightmapIndex >= 0)
+                staticLightingMode = StaticLightingMode.Lightmapped;
 
             dstEntityManager.AddComponentData(entity, new PerInstanceCullingTag());
             dstEntityManager.AddComponentData(entity, new RenderBounds { Value = localBounds });
+
+            var material = materials[id];
+
+            if(staticLightingMode == StaticLightingMode.Lightmapped && lightMaps.isValid)
+            {
+                conversionSystem.DeclareAssetDependency(meshRenderer.gameObject, material);
+
+                var localFlags = LightMappingFlags.Lightmapped;
+                if (lightMaps.hasDirections)
+                    localFlags |= LightMappingFlags.Directional;
+                if (lightMaps.hasShadowMask)
+                    localFlags |= LightMappingFlags.ShadowMask;
+
+                var key = new MaterialLookupKey
+                {
+                    BaseMaterial = materials[id],
+                    lightmaps = lightMaps,
+                    Flags = localFlags
+                };
+
+                var lookUp = createdMaterials ?? new Dictionary<MaterialLookupKey, Material>();
+                if (lookUp.TryGetValue(key, out Material result))
+                {
+                    material = result;
+                }
+                else
+                {
+                    material = new Material(materials[id]);
+                    material.name = $"{material.name}_Lightmapped_";
+                    material.EnableKeyword("LIGHTMAP_ON");
+
+                    material.SetTexture("unity_Lightmaps", lightMaps.colors);
+                    material.SetTexture("unity_LightmapsInd", lightMaps.directions);
+                    material.SetTexture("unity_ShadowMasks", lightMaps.shadowMasks);
+
+                    if (lightMaps.hasDirections)
+                    {
+                        material.name = material.name + "_DIRLIGHTMAP";
+                        material.EnableKeyword("DIRLIGHTMAP_COMBINED");
+                    }
+
+                    if (lightMaps.hasShadowMask)
+                    {
+                        material.name = material.name + "_SHADOW_MASK";
+                    }
+
+                    lookUp[key] = material;
+                }
+                dstEntityManager.AddComponentData(entity, new BuiltinMaterialPropertyUnity_LightmapST() {Value = meshRenderer.lightmapScaleOffset});
+                dstEntityManager.AddComponentData(entity, new BuiltinMaterialPropertyUnity_LightmapIndex() {Value = lightmapIndex});
+                dstEntityManager.AddSharedComponentData(entity, lightMaps);
+            }
+            else if (staticLightingMode == StaticLightingMode.LightProbes)
+            {
+                if (meshRenderer.lightProbeUsage == LightProbeUsage.CustomProvided)
+                    dstEntityManager.AddComponent<CustomProbeTag>(entity);
+                else if (meshRenderer.lightProbeUsage == LightProbeUsage.BlendProbes
+                         && LightmapSettings.lightProbes != null
+                         && LightmapSettings.lightProbes.count > 0)
+                    dstEntityManager.AddComponent<BlendProbeTag>(entity);
+                else
+                    dstEntityManager.AddComponent<AmbientProbeTag>(entity);
+            }
+            renderMesh.material = material;
+
+            dstEntityManager.AddSharedComponentData(entity, renderMesh);
 
             if (flipWinding)
                 dstEntityManager.AddComponent(entity, ComponentType.ReadWrite<RenderMeshFlippedWindingTag>());
@@ -101,15 +234,6 @@ namespace Unity.Rendering
             {
                 Value = new float4(0, 0, 1, 0)
             });
-
-            if (meshRenderer.lightProbeUsage == LightProbeUsage.CustomProvided)
-            {
-                dstEntityManager.AddComponent<CustomProbeTag>(entity);
-            }
-            else
-            {
-                dstEntityManager.AddComponent<AmbientProbeTag>(entity);
-            }
 #endif
 #endif
         }
@@ -121,6 +245,9 @@ namespace Unity.Rendering
             Renderer meshRenderer,
             Mesh mesh,
             List<Material> materials,
+            Dictionary<MaterialLookupKey, Material> createdMaterials,
+            LightMaps lightMaps,
+            int lightmapIndex,
             Transform root,
             AABB localBounds)
         {
@@ -129,7 +256,9 @@ namespace Unity.Rendering
             // Don't add RenderMesh (and other required components) unless both mesh and material are assigned.
             if (mesh == null || materialCount == 0)
             {
-                Debug.LogWarning("MeshRenderer is not converted because either the assigned mesh is null or no materials are assigned.", meshRenderer);
+                Debug.LogWarning(
+                    "MeshRenderer is not converted because either the assigned mesh is null or no materials are assigned.",
+                    meshRenderer);
                 return;
             }
 
@@ -147,9 +276,12 @@ namespace Unity.Rendering
                     conversionSystem,
                     meshRenderer,
                     mesh,
-                    materials[0],
+                    materials,
+                    createdMaterials,
                     flipWinding,
                     0,
+                    lightMaps,
+                    lightmapIndex,
                     localBounds);
             }
             else
@@ -160,11 +292,12 @@ namespace Unity.Rendering
                 {
                     var meshEntity = conversionSystem.CreateAdditionalEntity(meshRenderer);
 
-                    dstEntityManager.AddComponentData(meshEntity, new LocalToWorld { Value = localToWorld });
+                    dstEntityManager.AddComponentData(meshEntity, new LocalToWorld {Value = localToWorld});
                     if (!dstEntityManager.HasComponent<Static>(meshEntity))
                     {
-                        dstEntityManager.AddComponentData(meshEntity, new Parent { Value = rootEntity });
-                        dstEntityManager.AddComponentData(meshEntity, new LocalToParent { Value = float4x4.identity });
+                        dstEntityManager.AddComponentData(meshEntity, new Parent {Value = rootEntity});
+                        dstEntityManager.AddComponentData(meshEntity,
+                            new LocalToParent {Value = float4x4.identity});
                     }
 
                     AddComponentsToEntity(
@@ -173,9 +306,12 @@ namespace Unity.Rendering
                         conversionSystem,
                         meshRenderer,
                         mesh,
-                        materials[m],
+                        materials,
+                        createdMaterials,
                         flipWinding,
                         m,
+                        lightMaps,
+                        lightmapIndex,
                         localBounds);
                 }
             }

@@ -1,6 +1,5 @@
 // #define DEBUG_ASSERTS
 
-using UnityEngine;
 using UnityEngine.Assertions;
 using System;
 using Unity.Collections;
@@ -44,6 +43,7 @@ namespace Unity.Rendering
         {
             m_SizeBins = new NativeList<SizeBin>(Allocator.Persistent);
             m_Blocks = new NativeList<BlocksOfSize>(Allocator.Persistent);
+            m_BlocksFreelist = new NativeList<int>(Allocator.Persistent);
             m_FreeEndpoints = new NativeHashMap<ulong, ulong>(0, Allocator.Persistent);
             m_Size = 0;
             m_Free = 0;
@@ -56,6 +56,7 @@ namespace Unity.Rendering
         public uint MinimumAlignment { get { return 1u << m_MinimumAlignmentLog2; } }
         public ulong FreeSpace { get { return m_Free; } }
         public ulong UsedSpace { get { return m_Size - m_Free; } }
+        public ulong OnePastHighestUsedAddress { get { return m_FreeEndpoints[m_Size]; } }
         public ulong Size { get { return m_Size; } }
         public bool Empty { get { return m_Free == m_Size; } }
         public bool Full { get { return m_Free == 0; } }
@@ -67,6 +68,7 @@ namespace Unity.Rendering
 
             m_SizeBins.Clear();
             m_Blocks.Clear();
+            m_BlocksFreelist.Clear();
             m_FreeEndpoints.Clear();
             m_Size = 0;
             m_Free = 0;
@@ -84,6 +86,7 @@ namespace Unity.Rendering
 
             m_FreeEndpoints.Dispose();
             m_Blocks.Dispose();
+            m_BlocksFreelist.Dispose();
             m_SizeBins.Dispose();
             m_IsCreated = false;
         }
@@ -145,6 +148,9 @@ namespace Unity.Rendering
             return new HeapBlock();
         }
 
+        // Mark the given block as free. The given block must have been
+        // wholly allocated before, but it's legal to release big
+        // allocations in smaller non-overlapping sub-blocks.
         public void Release(HeapBlock block)
         {
             // Merge the newly released block with any free blocks on either
@@ -158,9 +164,7 @@ namespace Unity.Rendering
             // If the exact bin doesn't exist, add it.
             if (index >= m_SizeBins.Length || bin.CompareTo(m_SizeBins[index]) != 0)
             {
-                bin.blocksId = m_Blocks.Length;
-                m_Blocks.Add(new BlocksOfSize(0));
-                index = AddNewBin(bin, index);
+                index = AddNewBin(ref bin, index);
             }
 
             m_Blocks[m_SizeBins[index].blocksId].Push(block);
@@ -175,6 +179,77 @@ namespace Unity.Rendering
             // easy coalescing.
             m_FreeEndpoints[block.begin] = block.end;
             m_FreeEndpoints[block.end]   = block.begin;
+        }
+
+        // Do a slow exhaustive test of the allocator's internal state to verify
+        // that its invariants have not been broken. Should be only used for debugging.
+        public void DebugValidateInternalState()
+        {
+            // Amount of size bins should be the same as the amount of block lists
+            // for those size bins.
+            int numBins = m_SizeBins.Length;
+            int numFreeBlockLists = m_BlocksFreelist.Length;
+            int numEmptyBlocks = 0;
+            int numNonEmptyBlocks = 0;
+
+            for (int i = 0; i < m_Blocks.Length; ++i)
+            {
+                if (m_Blocks[i].Empty)
+                    ++numEmptyBlocks;
+                else
+                    ++numNonEmptyBlocks;
+            }
+
+            Assert.AreEqual(numBins, numNonEmptyBlocks, "There should be exactly one non-empty block list per size bin");
+            Assert.AreEqual(numEmptyBlocks, numFreeBlockLists, "All empty block lists should be in the free list");
+
+            for (int i = 0; i < m_BlocksFreelist.Length; ++i)
+            {
+                int freeBlock = m_BlocksFreelist[i];
+                Assert.IsTrue(m_Blocks[freeBlock].Empty, "There should be only empty block lists in the free list");
+            }
+
+            ulong totalFreeSize = 0;
+            int totalFreeBlocks = 0;
+
+            for (int i = 0; i < m_SizeBins.Length; ++i)
+            {
+                var sizeBin = m_SizeBins[i];
+                var size = sizeBin.Size;
+                var align = sizeBin.Alignment;
+                var blocks = m_Blocks[sizeBin.blocksId];
+
+                Assert.IsFalse(blocks.Empty, "All block lists should be non-empty, empty lists should be removed");
+
+                int count = blocks.Length;
+
+                for (int j = 0; j < count; ++j)
+                {
+                    var b = blocks.Block(j);
+                    var bin = new SizeBin(b);
+                    Assert.AreEqual(size, bin.Size, "Block size should match its bin");
+                    Assert.AreEqual(align, bin.Alignment, "Block alignment should match its bin");
+                    totalFreeSize += b.Length;
+
+                    if (m_FreeEndpoints.TryGetValue(b.begin, out var foundEnd))
+                        Assert.AreEqual(b.end, foundEnd, "Free block end does not match stored endpoint");
+                    else
+                        Assert.IsTrue(false, "No end endpoint found for free block");
+
+                    if (m_FreeEndpoints.TryGetValue(b.end, out var foundBegin))
+                        Assert.AreEqual(b.begin, foundBegin, "Free block begin does not match stored endpoint");
+                    else
+                        Assert.IsTrue(false, "No begin endpoint found for free block");
+
+                    ++totalFreeBlocks;
+                }
+            }
+
+            // Reported free space should be equal to the total size of the free blocks
+            Assert.AreEqual(totalFreeSize, FreeSpace, "Free size reported incorrectly");
+            Assert.IsTrue(totalFreeSize <= Size, "Amount of free size larger than maximum");
+            Assert.AreEqual(2 * totalFreeBlocks, m_FreeEndpoints.Count(),
+                "Each free block should have exactly 2 stored endpoints");
         }
 
         public const int MaxAlignmentLog2 = 0x3f;
@@ -227,7 +302,7 @@ namespace Unity.Rendering
 
             public BlocksOfSize(int dummy)
             {
-                m_Blocks = (UnsafeList*)UnsafeUtility.Malloc(
+                m_Blocks = (UnsafeList*)Memory.Unmanaged.Allocate(
                     UnsafeUtility.SizeOf<UnsafeList>(),
                     UnsafeUtility.AlignOf<UnsafeList>(),
                     Allocator.Persistent);
@@ -273,14 +348,16 @@ namespace Unity.Rendering
             public void Dispose()
             {
                 m_Blocks->Dispose();
-                UnsafeUtility.Free(m_Blocks, Allocator.Persistent);
+                Memory.Unmanaged.Free(m_Blocks, Allocator.Persistent);
             }
 
-            private unsafe HeapBlock Block(int i) { return UnsafeUtility.ReadArrayElement<HeapBlock>(m_Blocks->Ptr, i); }
+            public unsafe HeapBlock Block(int i) { return UnsafeUtility.ReadArrayElement<HeapBlock>(m_Blocks->Ptr, i); }
+            public unsafe int Length => m_Blocks->Length;
         }
 
         private NativeList<SizeBin> m_SizeBins;
         private NativeList<BlocksOfSize> m_Blocks;
+        private NativeList<int> m_BlocksFreelist;
         private NativeHashMap<ulong, ulong> m_FreeEndpoints;
         private ulong m_Size;
         private ulong m_Free;
@@ -329,8 +406,25 @@ namespace Unity.Rendering
             }
         }
 
-        private unsafe int AddNewBin(SizeBin bin, int index)
+        private unsafe int AddNewBin(ref SizeBin bin, int index)
         {
+            // If there are no free block lists, make a new one
+            if (m_BlocksFreelist.IsEmpty)
+            {
+                bin.blocksId = m_Blocks.Length;
+                m_Blocks.Add(new BlocksOfSize(0));
+            }
+            else
+            {
+                int last = m_BlocksFreelist.Length - 1;
+                bin.blocksId = m_BlocksFreelist[last];
+                m_BlocksFreelist.ResizeUninitialized(last);
+            }
+
+#if DEBUG_ASSERTS
+            Assert.IsTrue(m_Blocks[bin.blocksId].Empty);
+#endif
+
             int tail = m_SizeBins.Length - index;
             m_SizeBins.ResizeUninitialized(m_SizeBins.Length + 1);
             SizeBin *p = (SizeBin *)m_SizeBins.GetUnsafePtr();
@@ -339,10 +433,11 @@ namespace Unity.Rendering
                 p + index,
                 tail * UnsafeUtility.SizeOf<SizeBin>());
             p[index] = bin;
+
             return index;
         }
 
-        private unsafe void RemoveEmptyBins(SizeBin bin, int index)
+        private unsafe void RemoveBinIfEmpty(SizeBin bin, int index)
         {
             if (!m_Blocks[bin.blocksId].Empty)
                 return;
@@ -354,6 +449,8 @@ namespace Unity.Rendering
                 p + (index + 1),
                 tail * UnsafeUtility.SizeOf<SizeBin>());
             m_SizeBins.ResizeUninitialized(m_SizeBins.Length - 1);
+
+            m_BlocksFreelist.Add(bin.blocksId);
         }
 
         private unsafe HeapBlock PopBlockFromBin(SizeBin bin, int index)
@@ -362,7 +459,7 @@ namespace Unity.Rendering
             RemoveEndpoints(block);
             m_Free -= block.Length;
 
-            RemoveEmptyBins(bin, index);
+            RemoveBinIfEmpty(bin, index);
 
             return block;
         }
@@ -386,7 +483,7 @@ namespace Unity.Rendering
 #endif
 
             bool removed = m_Blocks[m_SizeBins[index].blocksId].Remove(block);
-            RemoveEmptyBins(m_SizeBins[index], index);
+            RemoveBinIfEmpty(m_SizeBins[index], index);
 
 #if DEBUG_ASSERTS
             Assert.IsTrue(removed, "Block was supposed to exist");

@@ -249,10 +249,9 @@ namespace Unity.Rendering
 
         [NativeDisableParallelForRestriction] public NativeArray<int> IndexList;
         [NativeDisableParallelForRestriction] public NativeArray<BatchVisibility> Batches;
-
         public const uint kMaxEntitiesPerChunk = 128;
         [NativeDisableParallelForRestriction] public NativeArray<int> ThreadLocalIndexLists;
-
+        
 #pragma warning disable 649
         [NativeSetThreadIndex] public int ThreadIndex;
 #pragma warning restore 649
@@ -283,6 +282,9 @@ namespace Unity.Rendering
 
                 int internalBatchIndex = hybridChunkInfo.InternalIndex;
                 int externalBatchIndex = InternalToExternalRemappingTable[internalBatchIndex];
+
+                int chunkOutputOffset = 0;
+                int instanceOutputOffset = 0;
 
                 ref var chunkCullingData = ref hybridChunkInfo.CullingData;
 
@@ -326,8 +328,6 @@ namespace Unity.Rendering
                         var chunk = chunkHeader.ArchetypeChunk;
                         var chunkInstanceBounds = chunk.GetNativeArray(BoundsComponent);
 
-                        int instanceOutputOffset = 0;
-
                         for (int j = 0; j < 2; j++)
                         {
                             var lodWord = chunkEntityLodEnabled.Enabled[j];
@@ -359,8 +359,8 @@ namespace Unity.Rendering
 
                         if (chunkOutputCount > 0)
                         {
-                            int chunkOutputOffset = System.Threading.Interlocked.Add(
-                                ref pBatch->visibleCount, chunkOutputCount) - chunkOutputCount;
+                            chunkOutputOffset = System.Threading.Interlocked.Add(
+                                    ref pBatch->visibleCount, chunkOutputCount) - chunkOutputCount;
 
                             chunkOutputOffset += batchOutputOffset;
 
@@ -387,12 +387,10 @@ namespace Unity.Rendering
                         int chunkOutputCount = math.countbits(chunkEntityLodEnabled.Enabled[0]) +
                             math.countbits(chunkEntityLodEnabled.Enabled[1]);
 
-                        int chunkOutputOffset = System.Threading.Interlocked.Add(
+                        chunkOutputOffset = System.Threading.Interlocked.Add(
                             ref pBatch->visibleCount, chunkOutputCount) - chunkOutputCount;
 
                         chunkOutputOffset += batchOutputOffset;
-
-                        int instanceOutputOffset = 0;
 
                         for (int j = 0; j < 2; j++)
                         {
@@ -411,7 +409,8 @@ namespace Unity.Rendering
                         }
                     }
                 }
-
+                chunkCullingData.StartIndex = (short)chunkOutputOffset;
+                chunkCullingData.Visible = (short)instanceOutputOffset;
                 hybridChunkInfoArray[entityIndex] = hybridChunkInfo;
             }
         }

@@ -31,8 +31,19 @@ namespace Unity.Rendering
             {
                 var minMaxAabb = MinMaxAABB.Empty;
                 for (int i = 0; i != RenderBounds.Length; i++)
-                    minMaxAabb.Encapsulate(RenderBounds[i].Value);
+                {
+                    var aabb = RenderBounds[i].Value;
 
+                    // MUST BE FIXED BY https://unity3d.atlassian.net/browse/DOTS-2518
+                    //
+                    // Avoid empty RenderBounds AABB because is means it hasn't been computed yet
+                    // There are some unfortunate cases where RenderBoundsUpdateSystem is executed after this system
+                    //  and a bad Scene AABB is computed if we consider these empty RenderBounds AABB.
+                    if (math.lengthsq(aabb.Center) != 0.0f && math.lengthsq(aabb.Extents) != 0.0f)
+                    {
+                        minMaxAabb.Encapsulate(aabb);
+                    }
+                }
                 SceneBounds[SceneBoundsEntity] = new Unity.Scenes.SceneBoundingVolume { Value = minMaxAabb };
             }
         }
@@ -154,6 +165,7 @@ namespace Unity.Rendering
                 }
                 );
             m_WorldRenderBounds.SetChangedVersionFilter(new[] { ComponentType.ReadOnly<RenderBounds>(), ComponentType.ReadOnly<LocalToWorld>()});
+            m_WorldRenderBounds.AddOrderVersionFilter();
         }
 
         protected override JobHandle OnUpdate(JobHandle dependency)

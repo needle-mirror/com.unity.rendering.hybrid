@@ -26,12 +26,14 @@
 #if !UNITY_2020_1_OR_NEWER
 #error Hybrid Renderer V2 requires Unity 2020.1 or newer.
 #endif
-
 #if !(HDRP_9_0_0_OR_NEWER || URP_9_0_0_OR_NEWER)
 #error Hybrid Renderer V2 requires either HDRP 9.0.0 or URP 9.0.0 or newer.
 #endif
 #endif
 
+#if ENABLE_UNITY_OCCLUSION && ENABLE_HYBRID_RENDERER_V2 && UNITY_2020_2_OR_NEWER && (HDRP_9_0_0_OR_NEWER || URP_9_0_0_OR_NEWER)
+#define USE_UNITY_OCCLUSION
+#endif
 
 // TODO:
 // - Minimize struct sizes to improve memory footprint and cache usage
@@ -50,6 +52,7 @@ using Unity.Entities;
 using Unity.Jobs;
 using Unity.Jobs.LowLevel.Unsafe;
 using Unity.Mathematics;
+using Unity.Profiling;
 using Unity.Transforms;
 using UnityEngine;
 using UnityEngine.Profiling;
@@ -57,6 +60,10 @@ using UnityEngine.Rendering;
 #if UNITY_2020_1_OR_NEWER
 // This API only exists since 2020.1
 using Unity.Rendering.HybridV2;
+#endif
+
+#if USE_UNITY_OCCLUSION
+using Unity.Rendering.Occlusion;
 #endif
 
 namespace Unity.Rendering
@@ -71,6 +78,51 @@ namespace Unity.Rendering
 
         public HybridChunkCullingData CullingData;
         public bool Valid;
+    }
+
+    // Describes a single set of data to be uploaded from the CPU to the GPU during this frame.
+    // The operations are collected up front so their total size can be known for buffer allocation
+    // purposes, and for effectively load balancing the upload memcpy work.
+    public unsafe struct GpuUploadOperation
+    {
+        public enum UploadOperationKind
+        {
+            Memcpy, // raw upload of a byte block to the GPU
+            SOAMatrixUpload3x4, // upload matrices from CPU, invert on GPU, write in SoA arrays, 3x4 destination
+            SOAMatrixUpload4x4, // upload matrices from CPU, invert on GPU, write in SoA arrays, 4x4 destination
+            // TwoMatrixUpload, // upload matrices from CPU, write them and their inverses to GPU (for transform sharing branch)
+        }
+
+        // Which kind of upload operation this is
+        public UploadOperationKind Kind;
+        // Pointer to source data, whether raw byte data or float4x4 matrices
+        public void* Src;
+        // GPU offset to start writing destination data in
+        public int DstOffset;
+        // GPU offset to start writing any inverse matrices in, if applicable
+        public int DstOffsetInverse;
+        // Size in bytes for raw operations, size in whole matrices for matrix operations
+        public int Size;
+        // Destination stride in bytes between matrices in matrix operations
+        public int Stride;
+
+        // Raw uploads require their size in bytes from the upload buffer.
+        // Matrix operations require a single 48-byte matrix per matrix.
+        public int BytesRequiredInUploadBuffer => (Kind == UploadOperationKind.Memcpy)
+            ? Size
+            : (Size * UnsafeUtility.SizeOf<float3x4>());
+    }
+
+    // Describes a GPU blitting operation (= same bytes replicated over a larger area) used
+    // to write default values for Hybrid batches
+    public struct DefaultValueBlitDescriptor
+    {
+        public float4x4 DefaultValue;
+        public uint DestinationOffset;
+        public uint ValueSizeBytes;
+        public uint Count;
+
+        public int BytesRequiredInUploadBuffer => (int)(ValueSizeBytes * Count);
     }
 
     public struct WorldToLocal_Tag : IComponentData {}
@@ -138,38 +190,68 @@ namespace Unity.Rendering
         public static unsafe float AtomicMin(float* floats, int index, float value)
         {
             float currentValue = floats[index];
+
+            // Never propagate NaNs to memory
+            if (float.IsNaN(value))
+                return currentValue;
+
+            int* floatsAsInts = (int*) floats;
+            int valueAsInt = math.asint(value);
+
+            // Do the CAS operations as ints to avoid problems with NaNs
             for (;;)
             {
+                // If currentValue is NaN, this comparison will fail
                 if (currentValue <= value)
                     return currentValue;
 
-                float newValue = value;
-                float prevValue = System.Threading.Interlocked.CompareExchange(ref floats[index], newValue, currentValue);
+                int currentValueAsInt = math.asint(currentValue);
+
+                int newValue = valueAsInt;
+                int prevValue = System.Threading.Interlocked.CompareExchange(ref floatsAsInts[index], newValue, currentValueAsInt);
+                float prevValueAsFloat = math.asfloat(prevValue);
 
                 // If the value was equal to the expected value, we know that our atomic went through
-                if (prevValue == currentValue)
-                    return prevValue;
+                // NOTE: This comparison MUST be an integer comparison, as otherwise NaNs
+                // would result in an infinite loop
+                if (prevValue == currentValueAsInt)
+                    return prevValueAsFloat;
 
-                currentValue = prevValue;
+                currentValue = prevValueAsFloat;
             }
         }
 
         public static unsafe float AtomicMax(float* floats, int index, float value)
         {
             float currentValue = floats[index];
+
+            // Never propagate NaNs to memory
+            if (float.IsNaN(value))
+                return currentValue;
+
+            int* floatsAsInts = (int*) floats;
+            int valueAsInt = math.asint(value);
+
+            // Do the CAS operations as ints to avoid problems with NaNs
             for (;;)
             {
+                // If currentValue is NaN, this comparison will fail
                 if (currentValue >= value)
                     return currentValue;
 
-                float newValue = value;
-                float prevValue = System.Threading.Interlocked.CompareExchange(ref floats[index], newValue, currentValue);
+                int currentValueAsInt = math.asint(currentValue);
+
+                int newValue = valueAsInt;
+                int prevValue = System.Threading.Interlocked.CompareExchange(ref floatsAsInts[index], newValue, currentValueAsInt);
+                float prevValueAsFloat = math.asfloat(prevValue);
 
                 // If the value was equal to the expected value, we know that our atomic went through
-                if (prevValue == currentValue)
-                    return prevValue;
+                // NOTE: This comparison MUST be an integer comparison, as otherwise NaNs
+                // would result in an infinite loop
+                if (prevValue == currentValueAsInt)
+                    return prevValueAsFloat;
 
-                currentValue = prevValue;
+                currentValue = prevValueAsFloat;
             }
         }
     }
@@ -234,11 +316,17 @@ namespace Unity.Rendering
         public const int kMaxZ = 5;
 
         public ComponentTypeCache.BurstCompatibleTypeArray ComponentTypes;
-        public ThreadedSparseUploader ThreadedSparseUploader;
+
+        [NativeDisableParallelForRestriction]
         public NativeArray<long> UnreferencedInternalIndices;
+        [NativeDisableParallelForRestriction]
         public NativeArray<long> BatchRequiresUpdates;
+        [NativeDisableParallelForRestriction]
         public NativeArray<long> BatchHadMovingEntities;
+
+        [NativeDisableParallelForRestriction]
         public NativeArray<ArchetypeChunk> NewChunks;
+        [NativeDisableParallelForRestriction]
         public NativeArray<int> NumNewChunks;
 
         [NativeDisableParallelForRestriction]
@@ -259,6 +347,10 @@ namespace Unity.Rendering
         public NativeArray<IntPtr> BatchPickingMatrices;
 #endif
 
+        [NativeDisableParallelForRestriction]
+        public NativeArray<GpuUploadOperation> GpuUploadOperations;
+        public NativeArray<int> NumGpuUploadOperations;
+
         public uint LastSystemVersion;
         public int PreviousBatchIndex;
 
@@ -269,6 +361,7 @@ namespace Unity.Rendering
 
 #if PROFILE_BURST_JOB_INTERNALS
         public ProfilerMarker ProfileAddUpload;
+        public ProfilerMarker ProfilePickingMatrices;
 #endif
 
         public unsafe void MarkBatchForUpdates(int internalIndex, bool entitiesMoved)
@@ -388,7 +481,7 @@ namespace Unity.Rendering
                         if (isLocalToWorld || isPrevLocalToWorld)
                         {
                             var numMatrices = sizeBytes / sizeof(float4x4);
-                            ThreadedSparseUploader.AddMatrixUpload(
+                            AddMatrixUpload(
                                 srcPtr,
                                 numMatrices,
                                 dstOffset,
@@ -407,18 +500,24 @@ namespace Unity.Rendering
                             // are guaranteed to have finished before rendering starts.
                             if (isLocalToWorld)
                             {
+#if PROFILE_BURST_JOB_INTERNALS
+                                ProfilePickingMatrices.Begin();
+#endif
                                 float4x4* batchPickingMatrices = (float4x4*)BatchPickingMatrices[internalIndex];
                                 int chunkOffsetInBatch = chunkInfo.CullingData.BatchOffset;
                                 UnsafeUtility.MemCpy(
                                     batchPickingMatrices + chunkOffsetInBatch,
                                     srcPtr,
                                     sizeBytes);
+#if PROFILE_BURST_JOB_INTERNALS
+                                ProfilePickingMatrices.End();
+#endif
                             }
 #endif
                         }
                         else
                         {
-                            ThreadedSparseUploader.AddUpload(
+                            AddUpload(
                                 srcPtr,
                                 sizeBytes,
                                 dstOffset);
@@ -428,6 +527,60 @@ namespace Unity.Rendering
 #endif
                     }
                 }
+            }
+        }
+
+        private unsafe void AddUpload(void* srcPtr, int sizeBytes, int dstOffset)
+        {
+            int* numGpuUploadOperations = (int*) NumGpuUploadOperations.GetUnsafePtr();
+            int index = System.Threading.Interlocked.Add(ref numGpuUploadOperations[0], 1) - 1;
+
+            if (index < GpuUploadOperations.Length)
+            {
+                GpuUploadOperations[index] = new GpuUploadOperation
+                {
+                    Kind = GpuUploadOperation.UploadOperationKind.Memcpy,
+                    Src = srcPtr,
+                    DstOffset = dstOffset,
+                    DstOffsetInverse = -1,
+                    Size = sizeBytes,
+                    Stride = 0,
+                };
+            }
+            else
+            {
+                // Debug.Assert(false, "Maximum amount of GPU upload operations exceeded");
+            }
+        }
+
+        private unsafe void AddMatrixUpload(
+            void* srcPtr,
+            int numMatrices,
+            int dstOffset,
+            int dstOffsetInverse,
+            ThreadedSparseUploader.MatrixType matrixTypeCpu,
+            ThreadedSparseUploader.MatrixType matrixTypeGpu)
+        {
+            int* numGpuUploadOperations = (int*) NumGpuUploadOperations.GetUnsafePtr();
+            int index = System.Threading.Interlocked.Add(ref numGpuUploadOperations[0], 1) - 1;
+
+            if (index < GpuUploadOperations.Length)
+            {
+                GpuUploadOperations[index] = new GpuUploadOperation
+                {
+                    Kind = (matrixTypeGpu == ThreadedSparseUploader.MatrixType.MatrixType3x4)
+                        ? GpuUploadOperation.UploadOperationKind.SOAMatrixUpload3x4
+                        : GpuUploadOperation.UploadOperationKind.SOAMatrixUpload4x4,
+                    Src = srcPtr,
+                    DstOffset = dstOffset,
+                    DstOffsetInverse = dstOffsetInverse,
+                    Size = numMatrices,
+                    Stride = 0,
+                };
+            }
+            else
+            {
+                // Debug.Assert(false, "Maximum amount of GPU upload operations exceeded");
             }
         }
 
@@ -541,6 +694,60 @@ namespace Unity.Rendering
         }
     }
 
+    [BurstCompile]
+    internal unsafe struct ExecuteGpuUploads : IJobParallelFor
+    {
+        [ReadOnly] public NativeArray<GpuUploadOperation> GpuUploadOperations;
+        public ThreadedSparseUploader ThreadedSparseUploader;
+
+        public void Execute(int index)
+        {
+            var uploadOperation = GpuUploadOperations[index];
+
+            switch (uploadOperation.Kind)
+            {
+                case GpuUploadOperation.UploadOperationKind.Memcpy:
+                    ThreadedSparseUploader.AddUpload(
+                        uploadOperation.Src,
+                        uploadOperation.Size,
+                        uploadOperation.DstOffset);
+                    break;
+                case GpuUploadOperation.UploadOperationKind.SOAMatrixUpload3x4:
+                case GpuUploadOperation.UploadOperationKind.SOAMatrixUpload4x4:
+                    ThreadedSparseUploader.AddMatrixUpload(
+                        uploadOperation.Src,
+                        uploadOperation.Size,
+                        uploadOperation.DstOffset,
+                        uploadOperation.DstOffsetInverse,
+                        ThreadedSparseUploader.MatrixType.MatrixType4x4,
+                        (uploadOperation.Kind == GpuUploadOperation.UploadOperationKind.SOAMatrixUpload3x4)
+                        ? ThreadedSparseUploader.MatrixType.MatrixType3x4
+                        : ThreadedSparseUploader.MatrixType.MatrixType4x4);
+                    break;
+                default:
+                    break;
+            }
+        }
+    }
+
+    [BurstCompile]
+    internal unsafe struct UploadBlitJob : IJobParallelFor
+    {
+        [ReadOnly] public NativeList<DefaultValueBlitDescriptor> BlitList;
+        public ThreadedSparseUploader ThreadedSparseUploader;
+
+        public void Execute(int index)
+        {
+            DefaultValueBlitDescriptor blit = BlitList[index];
+            ThreadedSparseUploader.AddUpload(
+                &blit.DefaultValue,
+                (int)blit.ValueSizeBytes,
+                (int)blit.DestinationOffset,
+                (int)blit.Count);
+        }
+    }
+
+
     internal struct ChunkProperty
     {
         public int ComponentTypeIndex;
@@ -554,13 +761,15 @@ namespace Unity.Rendering
         public const int kFlagHasLodData = 1 << 0;
 
         public const int kFlagInstanceCulling = 1 << 1;
-
+        // size  // start - end offset
         // size  // start - end offset
         public short BatchOffset; //  2     2 - 4
-        public ushort MovementGraceFixed16; //  2     4 - 6
-        public byte Flags; //  1     6 - 7
-        public byte ForceLowLODPrevious; //  1     7 - 8
-        public ChunkInstanceLodEnabled InstanceLodEnableds; // 16     8 - 16
+        public short StartIndex; // 2     4 - 6
+        public short Visible; // 2     6 - 8
+        public ushort MovementGraceFixed16; //  2     8 - 10
+        public byte Flags; //  1     10 - 11
+        public byte ForceLowLODPrevious; //  1     11 - 12
+        public ChunkInstanceLodEnabled InstanceLodEnableds; // 16     12 - 20
     }
 
     // Helper to only call GetDynamicComponentTypeHandle once per type per frame
@@ -846,7 +1055,6 @@ namespace Unity.Rendering
 #endif
     public unsafe class HybridRendererSystem : JobComponentSystem
     {
-        private HybridRendererSettings m_Settings;
         private ulong m_PersistentInstanceDataSize;
 
         private EntityQuery m_CullingJobDependencyGroup;
@@ -874,7 +1082,10 @@ namespace Unity.Rendering
         const int kNumGatheredIndicesPerThread = 128 * 8; // Two cache lines per thread
         const int kBuiltinCbufferIndex = 0;
 
-        const int kMaxChunkMetadata = 256 * 1024;
+        const int kMaxChunkMetadata = 1 * 1024 * 1024;
+        const ulong kMaxGPUAllocatorMemory = 1024 * 1024 * 1024; // 1GiB of potential memory space
+        const ulong kGPUBufferSizeIncrement = 4 * 1024 * 1024;
+        const int kGPUUploaderChunkSize = 4 * 1024 * 1024;
 
         private enum BatchFlags
         {
@@ -977,6 +1188,10 @@ namespace Unity.Rendering
         Dictionary<int, string> m_MaterialPropertyTypeNames;
         Dictionary<int, float4x4> m_MaterialPropertyDefaultValues;
         static Dictionary<Type, PropertyMapping> s_TypeToPropertyMappings = new Dictionary<Type, PropertyMapping>();
+
+#if USE_UNITY_OCCLUSION
+        private OcclusionCulling m_OcclusionCulling;
+#endif
 
         private bool m_FirstFrameAfterInit;
 
@@ -1124,8 +1339,7 @@ namespace Unity.Rendering
 
         protected override void OnCreate()
         {
-            m_Settings = HybridRendererSettings.GetOrCreateSettings();
-            m_PersistentInstanceDataSize = m_Settings.PersistentGpuMemoryBytes;
+            m_PersistentInstanceDataSize = kGPUBufferSizeIncrement;
 
             //@TODO: Support SetFilter with EntityQueryDesc syntax
             // This component group must include all types that are being used by the culling job
@@ -1204,7 +1418,7 @@ namespace Unity.Rendering
                 NativeArrayOptions.UninitializedMemory);
             m_ResetLod = true;
 
-            m_GPUPersistentAllocator = new HeapAllocator(m_PersistentInstanceDataSize, 16);
+            m_GPUPersistentAllocator = new HeapAllocator(kMaxGPUAllocatorMemory, 16);
             m_ChunkMetadataAllocator = new HeapAllocator(kMaxChunkMetadata);
 
             m_BatchInfos = new NativeArray<BatchInfo>(kMaxBatchCount, Allocator.Persistent);
@@ -1248,7 +1462,7 @@ namespace Unity.Rendering
                 });
 
 #if UNITY_EDITOR
-            m_CullingStats = (CullingStats*)UnsafeUtility.Malloc(JobsUtility.MaxJobThreadCount * sizeof(CullingStats),
+            m_CullingStats = (CullingStats*)Memory.Unmanaged.Allocate(JobsUtility.MaxJobThreadCount * sizeof(CullingStats),
                 64, Allocator.Persistent);
 #endif
 
@@ -1293,7 +1507,12 @@ namespace Unity.Rendering
                 (int)m_PersistentInstanceDataSize / 4,
                 4,
                 ComputeBufferType.Raw);
-            m_GPUUploader = new SparseUploader(m_GPUPersistentInstanceData);
+            m_GPUUploader = new SparseUploader(m_GPUPersistentInstanceData, kGPUUploaderChunkSize);
+
+#if USE_UNITY_OCCLUSION
+            m_OcclusionCulling = new OcclusionCulling();
+            m_OcclusionCulling.Create(EntityManager);
+#endif
 
             m_FirstFrameAfterInit = true;
         }
@@ -1400,22 +1619,9 @@ namespace Unity.Rendering
                 uint reflectionVersionNumber = 0;
                 bool reflectionChanged = false;
 #endif
-                bool gpuSizeChanged = (m_Settings.PersistentGpuMemoryBytes != m_PersistentInstanceDataSize);
-                if (gpuSizeChanged)
-                {
-                    m_PersistentInstanceDataSize = m_Settings.PersistentGpuMemoryBytes;
-                    m_GPUPersistentInstanceData.Dispose();
-                    m_GPUPersistentInstanceData = new ComputeBuffer(
-                        (int)m_PersistentInstanceDataSize / 4,
-                        4,
-                        ComputeBufferType.Raw);
-                    m_GPUUploader.ReplaceBuffer(m_GPUPersistentInstanceData);
-                    m_GPUUploader.ReleaseAllUploadBuffers();
-                }
 
                 if (HybridEditorTools.DebugSettings.RecreateAllBatches ||
-                    reflectionChanged ||
-                    gpuSizeChanged)
+                    reflectionChanged)
                 {
                     EntityManager.RemoveChunkComponentData<HybridChunkInfo>(m_HybridRenderedQuery);
 
@@ -1474,10 +1680,6 @@ namespace Unity.Rendering
             inputDeps.Complete(); // #todo
             CompleteJobs();
             ResetLod();
-            Profiler.EndSample();
-
-            Profiler.BeginSample("StartUpdate");
-            StartUpdate();
             Profiler.EndSample();
 
             Profiler.BeginSample("UpdateHybridV2Batches");
@@ -1586,7 +1788,7 @@ namespace Unity.Rendering
             m_GPUPersistentInstanceData.Dispose();
 
 #if UNITY_EDITOR
-            UnsafeUtility.Free(m_CullingStats, Allocator.Persistent);
+            Memory.Unmanaged.Free(m_CullingStats, Allocator.Persistent);
 
             m_CullingStats = null;
 #endif
@@ -1617,6 +1819,10 @@ namespace Unity.Rendering
             if (m_InternalIdFreelist.IsCreated) m_InternalIdFreelist.Dispose();
             m_ExternalBatchCount = 0;
             m_SortedInternalIds = null;
+
+#if USE_UNITY_OCCLUSION
+            m_OcclusionCulling.Dispose();
+#endif
 
             m_AABBsCleared = new JobHandle();
             m_AABBClearKicked = false;
@@ -1745,8 +1951,17 @@ namespace Unity.Rendering
 
             DidScheduleCullingJob(simpleCullingJobHandle);
 
+#if USE_UNITY_OCCLUSION
+            var occlusionCullingDependency = m_OcclusionCulling.Cull(EntityManager, m_InternalToExternalIds, cullingContext, m_CullingJobDependency
+#if UNITY_EDITOR
+                    , m_CullingStats
+#endif
+                    );
+            DidScheduleCullingJob(occlusionCullingDependency);
+#endif
+
             Profiler.EndSample();
-            return simpleCullingJobHandle;
+            return m_CullingJobDependency;
         }
 
         public JobHandle UpdateAllBatches(JobHandle inputDependencies)
@@ -1791,11 +2006,25 @@ namespace Unity.Rendering
 
             inputDependencies = JobHandle.CombineDependencies(inputDependencies, initializedUnreferenced);
 
+            int totalChunks = m_HybridRenderedQuery.CalculateChunkCount();
             var newChunks = new NativeArray<ArchetypeChunk>(
-                m_HybridRenderedQuery.CalculateChunkCount(),
+                totalChunks,
                 Allocator.TempJob,
                 NativeArrayOptions.UninitializedMemory);
             var numNewChunksArray = new NativeArray<int>(
+                1,
+                Allocator.TempJob,
+                NativeArrayOptions.ClearMemory);
+
+            // Conservative estimate is that every known type is in every chunk. There will be
+            // at most one operation per type per chunk, which will be either an actual
+            // chunk data upload, or a default value blit (a single type should not have both).
+            int conservativeMaximumGpuUploads = totalChunks * m_ComponentTypeCache.UsedTypeCount;
+            var gpuUploadOperations = new NativeArray<GpuUploadOperation>(
+                conservativeMaximumGpuUploads,
+                Allocator.TempJob,
+                NativeArrayOptions.UninitializedMemory);
+            var numGpuUploadOperationsArray = new NativeArray<int>(
                 1,
                 Allocator.TempJob,
                 NativeArrayOptions.ClearMemory);
@@ -1811,7 +2040,6 @@ namespace Unity.Rendering
             var hybridChunkUpdater = new HybridChunkUpdater
             {
                 ComponentTypes = m_ComponentTypeCache.ToBurstCompatible(Allocator.TempJob),
-                ThreadedSparseUploader = m_ThreadedGPUUploader,
                 UnreferencedInternalIndices = unreferencedInternalIndices,
                 BatchRequiresUpdates = batchRequiresUpdates,
                 BatchHadMovingEntities = batchHadMovingEntities,
@@ -1823,6 +2051,9 @@ namespace Unity.Rendering
                 LastSystemVersion = lastSystemVersion,
                 PreviousBatchIndex = -1,
 
+                GpuUploadOperations = gpuUploadOperations,
+                NumGpuUploadOperations = numGpuUploadOperationsArray,
+
                 LocalToWorldType = TypeManager.GetTypeIndex<LocalToWorld>(),
                 WorldToLocalType = TypeManager.GetTypeIndex<WorldToLocal_Tag>(),
                 PrevLocalToWorldType = TypeManager.GetTypeIndex<BuiltinMaterialPropertyUnity_MatrixPreviousM>(),
@@ -1830,6 +2061,7 @@ namespace Unity.Rendering
 
 #if PROFILE_BURST_JOB_INTERNALS
                 ProfileAddUpload = new ProfilerMarker("AddUpload"),
+                ProfilePickingMatrices = new ProfilerMarker("EditorPickingMatrices"),
 #endif
 #if USE_PICKING_MATRICES
                 BatchPickingMatrices = m_BatchPickingMatrices,
@@ -1849,6 +2081,12 @@ namespace Unity.Rendering
 
             // We need to wait for the job to complete here so we can process the new chunks
             updateAllJob.Schedule(m_MetaEntitiesForHybridRenderableChunks, updateAllDependencies).Complete();
+
+            // Garbage collect deleted batches before adding new ones to minimize peak memory use.
+            Profiler.BeginSample("GarbageCollectUnreferencedBatches");
+            int numRemoved = GarbageCollectUnreferencedBatches(unreferencedInternalIndices);
+            Profiler.EndSample();
+
             numNewChunks = numNewChunksArray[0];
 
             if (numNewChunks > 0)
@@ -1887,16 +2125,37 @@ namespace Unity.Rendering
             // part would only need to wait for the metadata checking, not the memcpys.
             hybridCompleted.Complete();
 
+            int numGpuUploadOperations = numGpuUploadOperationsArray[0];
+            Debug.Assert(numGpuUploadOperations <= gpuUploadOperations.Length, "Maximum GPU upload operation count exceeded");
+
+            ComputeUploadSizeRequirements(
+                numGpuUploadOperations, gpuUploadOperations,
+                out int numOperations, out int totalUploadBytes, out int biggestUploadBytes);
+
+#if DEBUG_LOG_UPLOADS
+            if (numOperations > 0)
+            {
+                Debug.Log($"GPU upload operations: {numOperations}, GPU upload bytes: {uploadBytes}");
+            }
+#endif
+            Profiler.BeginSample("StartUpdate");
+            StartUpdate(numOperations, totalUploadBytes, biggestUploadBytes);
+            Profiler.EndSample();
+
+            var uploadsExecuted = new ExecuteGpuUploads
+            {
+                GpuUploadOperations = gpuUploadOperations,
+                ThreadedSparseUploader = m_ThreadedGPUUploader,
+            }.Schedule(numGpuUploadOperations, 1);
+            numGpuUploadOperationsArray.Dispose();
+            gpuUploadOperations.Dispose(uploadsExecuted);
+
             Profiler.BeginSample("UpdateBatchProperties");
             UpdateBatchProperties(batchRequiresUpdates, batchHadMovingEntities);
             Profiler.EndSample();
 
             Profiler.BeginSample("UploadAllBlits");
             UploadAllBlits();
-            Profiler.EndSample();
-
-            Profiler.BeginSample("GarbageCollectUnreferencedBatches");
-            int numRemoved = GarbageCollectUnreferencedBatches(unreferencedInternalIndices);
             Profiler.EndSample();
 
 #if DEBUG_LOG_CHUNK_CHANGES
@@ -1912,7 +2171,32 @@ namespace Unity.Rendering
             batchRequiresUpdates.Dispose();
             batchHadMovingEntities.Dispose();
 
-            return hybridCompleted;
+            uploadsExecuted.Complete();
+
+            return uploadsExecuted;
+        }
+
+        private void ComputeUploadSizeRequirements(
+            int numGpuUploadOperations, NativeArray<GpuUploadOperation> gpuUploadOperations,
+            out int numOperations, out int totalUploadBytes, out int biggestUploadBytes)
+        {
+            numOperations = numGpuUploadOperations + m_DefaultValueBlits.Length;
+            totalUploadBytes = 0;
+            biggestUploadBytes = 0;
+
+            for (int i = 0; i < numGpuUploadOperations; ++i)
+            {
+                var numBytes = gpuUploadOperations[i].BytesRequiredInUploadBuffer;
+                totalUploadBytes += numBytes;
+                biggestUploadBytes = math.max(biggestUploadBytes, numBytes);
+            }
+
+            for (int i = 0; i < m_DefaultValueBlits.Length; ++i)
+            {
+                var numBytes = m_DefaultValueBlits[i].BytesRequiredInUploadBuffer;
+                totalUploadBytes += numBytes;
+                biggestUploadBytes = math.max(biggestUploadBytes, numBytes);
+            }
         }
 
         private int GarbageCollectUnreferencedBatches(NativeArray<long> unreferencedInternalIndices)
@@ -1948,7 +2232,7 @@ namespace Unity.Rendering
         struct BatchUpdateStatistics
         {
             // Ifdef struct contents to avoid warnings when ifdef is disabled.
-            #if DEBUG_LOG_BATCH_UPDATES
+#if DEBUG_LOG_BATCH_UPDATES
             public int BatchesWithChangedBounds;
             public int BatchesNeedingMotionVectors;
             public int BatchesWithoutMotionVectors;
@@ -1957,7 +2241,7 @@ namespace Unity.Rendering
                 BatchesWithChangedBounds > 0 ||
                 BatchesNeedingMotionVectors > 0 ||
                 BatchesWithoutMotionVectors > 0;
-            #endif
+#endif
         }
 
         private void UpdateBatchProperties(
@@ -2771,37 +3055,12 @@ namespace Unity.Rendering
             public ComponentTypeHandle<PerInstanceCullingTag> PerInstanceCullingTag;
         }
 
-        private struct DefaultValueBlitDescriptor
-        {
-            internal float4x4 DefaultValue;
-            internal uint DestinationOffset;
-            internal uint ValueSizeBytes;
-            internal uint Count;
-        }
-
-        [BurstCompile]
-        struct UploadBlitJob : IJobParallelFor
-        {
-            [ReadOnly] public NativeList<DefaultValueBlitDescriptor> BlitList;
-            public ThreadedSparseUploader ThreadedGpuUploader;
-
-            public void Execute(int index)
-            {
-                DefaultValueBlitDescriptor blit = BlitList[index];
-                ThreadedGpuUploader.AddUpload(
-                    &blit.DefaultValue,
-                    (int)blit.ValueSizeBytes,
-                    (int)blit.DestinationOffset,
-                    (int)blit.Count);
-            }
-        }
-
         private void UploadAllBlits()
         {
             UploadBlitJob uploadJob = new UploadBlitJob()
             {
                 BlitList = m_DefaultValueBlits,
-                ThreadedGpuUploader = m_ThreadedGPUUploader
+                ThreadedSparseUploader = m_ThreadedGPUUploader
             };
 
             JobHandle handle = uploadJob.Schedule(m_DefaultValueBlits.Length, 1);
@@ -2857,11 +3116,26 @@ namespace Unity.Rendering
             m_CullingJobDependencyGroup.AddDependency(job);
         }
 
-        public void StartUpdate()
+        public void StartUpdate(int numOperations, int totalUploadBytes, int biggestUploadBytes)
         {
+            var persistanceBytes = CollectionHelper.Align(m_GPUPersistentAllocator.OnePastHighestUsedAddress, kGPUBufferSizeIncrement);
+            bool gpuSizeChanged = persistanceBytes > m_PersistentInstanceDataSize;
+            if (gpuSizeChanged)
+            {
+                m_PersistentInstanceDataSize = persistanceBytes;
+                var newBuffer = new ComputeBuffer(
+                    (int)m_PersistentInstanceDataSize / 4,
+                    4,
+                    ComputeBufferType.Raw);
+                m_GPUUploader.ReplaceBuffer(newBuffer, true);
+
+                if(m_GPUPersistentInstanceData != null)
+                    m_GPUPersistentInstanceData.Dispose();
+                m_GPUPersistentInstanceData = newBuffer;
+            }
+
             m_ThreadedGPUUploader =
-                m_GPUUploader.Begin((int)m_PersistentInstanceDataSize, (int)m_PersistentInstanceDataSize / 24);
-            // Debug.Log($"GPU allocator: {(double)m_GPUPersistentAllocator.UsedSpace / (double)m_GPUPersistentAllocator.Size * 100.0}%");
+                m_GPUUploader.Begin(totalUploadBytes, biggestUploadBytes, numOperations);
         }
 
         public void EndUpdate()

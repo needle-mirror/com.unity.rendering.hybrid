@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using Unity.Mathematics;
 using UnityEngine;
+using UnityEngine.Jobs;
 using UnityEngine.Rendering;
 
 namespace Unity.Rendering
@@ -107,17 +108,17 @@ namespace Unity.Rendering
             return largestAxis;
         }
 
-        public static int CalculateCurrentLODIndex(float4 lodDistances, float3 worldReferencePoint, ref LODParams lodParams)
+        public static int CalculateCurrentLODIndex(float4 lodDistances, float scale, float3 worldReferencePoint, ref LODParams lodParams)
         {
             var distanceSqr = CalculateDistanceSqr(worldReferencePoint, ref lodParams);
-            var lodIndex = CalculateCurrentLODIndex(lodDistances, distanceSqr);
+            var lodIndex = CalculateCurrentLODIndex(lodDistances * scale, distanceSqr);
             return lodIndex;
         }
 
-        public static int CalculateCurrentLODMask(float4 lodDistances, float3 worldReferencePoint, ref LODParams lodParams)
+        public static int CalculateCurrentLODMask(float4 lodDistances, float scale, float3 worldReferencePoint, ref LODParams lodParams)
         {
             var distanceSqr = CalculateDistanceSqr(worldReferencePoint, ref lodParams);
-            return CalculateCurrentLODMask(lodDistances, distanceSqr);
+            return CalculateCurrentLODMask(lodDistances * scale, distanceSqr);
         }
 
         static int CalculateCurrentLODIndex(float4 lodDistances, float measuredDistanceSqr)

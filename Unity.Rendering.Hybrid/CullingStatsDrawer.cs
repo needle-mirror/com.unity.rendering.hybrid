@@ -1,4 +1,4 @@
-#if USE_BATCH_RENDERER_GROUP
+#if true// USE_BATCH_RENDERER_GROUP
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -12,9 +12,10 @@ namespace Unity.Rendering
 {
 #if UNITY_EDITOR
     [ExecuteAlways]
+    [ExecuteInEditMode]
     public class CullingStatsDrawer : MonoBehaviour
     {
-        private bool m_Enabled = false;
+        private bool m_Enabled = true;//false;
 
         private void Update()
         {
@@ -44,7 +45,9 @@ namespace Unity.Rendering
                 GUILayout.Label($"  Select LOD: Total={stats.Stats[CullingStats.kLodTotal]} No Requirements={stats.Stats[CullingStats.kLodNoRequirements]} Chunks Tested={stats.Stats[CullingStats.kLodChunksTested]} Changed={stats.Stats[CullingStats.kLodChanged]}");
                 GUILayout.Label($"  Root LODs selected: {stats.Stats[CullingStats.kCountRootLodsSelected]} Failed: {stats.Stats[CullingStats.kCountRootLodsFailed]}");
                 GUILayout.Label($"  Camera Move Distance: {stats.CameraMoveDistance} meters");
-
+#if ENABLE_UNITY_OCCLUSION && ENABLE_HYBRID_RENDERER_V2 && UNITY_2020_1_OR_NEWER && (HDRP_9_0_0_OR_NEWER || URP_9_0_0_OR_NEWER)
+                GUILayout.Label($"  Occlusion Culled: {stats.Stats[CullingStats.kCountOcclusionCulled]} / {stats.Stats[CullingStats.kCountOcclusionInput]}");
+#endif
                 GUILayout.EndArea();
             }
         }

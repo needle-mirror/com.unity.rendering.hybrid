@@ -56,6 +56,39 @@ namespace Unity.Rendering.Tests
 #if UNITY_2020_1_OR_NEWER
         [Test]
 #endif
+        public void ReplaceBuffer()
+        {
+            if (!SystemInfo.supportsComputeShaders)
+            {
+                Assert.Ignore("Skipped due to platform/computer not supporting compute shaders");
+                return;
+            }
+
+
+            var initialData = new ExampleStruct[64];
+            for (int i = 0; i < initialData.Length; ++i)
+                initialData[i] = new ExampleStruct { someData = i };
+
+            Setup(initialData);
+
+            var newBuffer = new ComputeBuffer(initialData.Length * 2, UnsafeUtility.SizeOf<ExampleStruct>());
+
+            uploader.ReplaceBuffer(newBuffer, true);
+            buffer.Dispose();
+            buffer = newBuffer;
+
+            var resultingData = new ExampleStruct[initialData.Length];
+            buffer.GetData(resultingData);
+
+            for (int i = 0; i < resultingData.Length; ++i)
+                Assert.AreEqual(i, resultingData[i].someData);
+
+            Teardown();
+        }
+
+#if UNITY_2020_1_OR_NEWER
+        [Test]
+#endif
         public void NoUploads()
         {
             if (!SystemInfo.supportsComputeShaders)
@@ -66,7 +99,10 @@ namespace Unity.Rendering.Tests
 
             Setup<float>(1);
 
-            var tsu = uploader.Begin(1024, 1);
+            var tsu = uploader.Begin(0, 0, 0);
+            uploader.EndAndCommit(tsu);
+
+            tsu = uploader.Begin(1024, 1024, 1);
             uploader.EndAndCommit(tsu);
 
             Teardown();
@@ -89,7 +125,9 @@ namespace Unity.Rendering.Tests
 
             Setup(initialData);
 
-            var tsu = uploader.Begin(UnsafeUtility.SizeOf<ExampleStruct>() * initialData.Length, initialData.Length);
+            var structSize = UnsafeUtility.SizeOf<ExampleStruct>();
+            var totalSize = structSize * initialData.Length;
+            var tsu = uploader.Begin(totalSize, structSize, initialData.Length);
             for (int i = 0; i < initialData.Length; ++i)
                 tsu.AddUpload(new ExampleStruct { someData = i }, i * 4);
             uploader.EndAndCommit(tsu);
@@ -120,7 +158,9 @@ namespace Unity.Rendering.Tests
 
             Setup(initialData);
 
-            var tsu = uploader.Begin(UnsafeUtility.SizeOf<ExampleStruct>(), 1);
+            var structSize = UnsafeUtility.SizeOf<ExampleStruct>();
+            var totalSize = structSize * initialData.Length;
+            var tsu = uploader.Begin(totalSize, totalSize, initialData.Length);
             tsu.AddUpload(new ExampleStruct {someData = 7}, 4);
             uploader.EndAndCommit(tsu);
 
@@ -131,7 +171,7 @@ namespace Unity.Rendering.Tests
             Assert.AreEqual(7, resultingData[1].someData);
             Assert.AreEqual(2, resultingData[2].someData);
 
-            tsu = uploader.Begin(UnsafeUtility.SizeOf<ExampleStruct>(), 1);
+            tsu = uploader.Begin(structSize, structSize, 1);
             tsu.AddUpload(new ExampleStruct {someData = 13}, 8);
             uploader.EndAndCommit(tsu);
 
@@ -170,7 +210,9 @@ namespace Unity.Rendering.Tests
             for (int i = 0; i < newData2.Length; ++i)
                 newData2[i] = new ExampleStruct {someData = i + 4000};
 
-            var tsu = uploader.Begin(UnsafeUtility.SizeOf<ExampleStruct>() * (newData.Length + newData2.Length), 2);
+            var structSize = UnsafeUtility.SizeOf<ExampleStruct>();
+            var totalSize = structSize * (newData.Length + newData2.Length);
+            var tsu = uploader.Begin(totalSize, totalSize, initialData.Length);
             fixed(void* ptr = newData)
             tsu.AddUpload(ptr, newData.Length * 4, 512 * 4);
             fixed(void* ptr2 = newData2)
@@ -215,7 +257,8 @@ namespace Unity.Rendering.Tests
 
             Setup(initialData);
 
-            var tsu = uploader.Begin(UnsafeUtility.SizeOf<ExampleStruct>(), 1);
+            var structSize = UnsafeUtility.SizeOf<ExampleStruct>();
+            var tsu = uploader.Begin(structSize, structSize, 1);
             tsu.AddUpload(new ExampleStruct { someData = 1 }, 0, 64);
             uploader.EndAndCommit(tsu);
 
@@ -258,7 +301,8 @@ namespace Unity.Rendering.Tests
             Setup(initialData);
 
             var job = new UploadJob();
-            job.uploader = uploader.Begin(initialData.Length * stride, initialData.Length);
+            var totalSize = initialData.Length * stride;
+            job.uploader = uploader.Begin(totalSize, stride, initialData.Length);
             job.Schedule(initialData.Length, 64).Complete();
             uploader.EndAndCommit(job.uploader);
 
@@ -306,7 +350,9 @@ namespace Unity.Rendering.Tests
 
             Setup(initialData);
 
-            var tsu = uploader.Begin(numMatrices * UnsafeUtility.SizeOf<float4x4>(), 1);
+            var matSize = UnsafeUtility.SizeOf<float4x4>();
+            var totalSize = numMatrices * matSize;
+            var tsu = uploader.Begin(totalSize, totalSize, 1);
             var deltaData = new NativeArray<float4x4>(numMatrices, Allocator.Temp);
             for (int i = 0; i < numMatrices; ++i)
                 deltaData[i] = GenerateTestMatrix(i);
@@ -348,7 +394,9 @@ namespace Unity.Rendering.Tests
 
             Setup(initialData);
 
-            var tsu = uploader.Begin(numMatrices * UnsafeUtility.SizeOf<float4x4>(), 1);
+            var matSize = UnsafeUtility.SizeOf<float4x4>();
+            var totalSize = numMatrices * matSize;
+            var tsu = uploader.Begin(totalSize, totalSize, 1);
             var deltaData = new NativeArray<float4x4>(numMatrices, Allocator.Temp);
             for (int i = 0; i < numMatrices; ++i)
                 deltaData[i] = GenerateTestMatrix(i);
@@ -393,7 +441,9 @@ namespace Unity.Rendering.Tests
 
             Setup(initialData);
 
-            var tsu = uploader.Begin(numMatrices * UnsafeUtility.SizeOf<float4x4>(), 1);
+            var matSize = UnsafeUtility.SizeOf<float4x4>();
+            var totalSize = numMatrices * matSize;
+            var tsu = uploader.Begin(totalSize, totalSize, 1);
             var deltaData = new NativeArray<float4x4>(numMatrices, Allocator.Temp);
             for (int i = 0; i < numMatrices; ++i)
                 deltaData[i] = GenerateTestMatrix(i);
@@ -438,7 +488,9 @@ namespace Unity.Rendering.Tests
 
             Setup(initialData);
 
-            var tsu = uploader.Begin(numMatrices * UnsafeUtility.SizeOf<float4x4>(), 1);
+            var matSize = UnsafeUtility.SizeOf<float4x4>();
+            var totalSize = numMatrices * matSize;
+            var tsu = uploader.Begin(totalSize, totalSize, 1);
             var deltaData = new NativeArray<float4x4>(numMatrices, Allocator.Temp);
             for (int i = 0; i < numMatrices; ++i)
                 deltaData[i] = GenerateTestMatrix(i);
@@ -483,7 +535,8 @@ namespace Unity.Rendering.Tests
             var initialData = new ExampleStruct[HugeCount];
 
             Setup(initialData);
-            var tsu = uploader.Begin(UnsafeUtility.SizeOf<ExampleStruct>() * HugeCount, HugeCount);
+            var structSize = UnsafeUtility.SizeOf<ExampleStruct>();
+            var tsu = uploader.Begin(structSize * HugeCount, structSize, HugeCount);
             for (int i = 0; i < initialData.Length; ++i)
                 tsu.AddUpload(new ExampleStruct {someData = i}, 4 * i);
             uploader.EndAndCommit(tsu);

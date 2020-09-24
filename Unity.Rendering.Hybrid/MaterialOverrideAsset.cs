@@ -6,7 +6,6 @@ using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
 
-[RequiresEntityConversion]
 [CreateAssetMenu(fileName = "MaterialOverrideAsset", menuName = "Shader/Material Override Asset", order = 1)] //TODO(andrew.theisen): where should this live in the menu?
 public class MaterialOverrideAsset : ScriptableObject
 {

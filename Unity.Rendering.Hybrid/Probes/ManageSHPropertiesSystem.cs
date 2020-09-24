@@ -31,7 +31,12 @@ namespace Unity.Rendering
             {
                 m_MissingSHQueries[i] = GetEntityQuery(new EntityQueryDesc
                 {
-                    Any = new[] {ComponentType.ReadOnly<AmbientProbeTag>(), ComponentType.ReadOnly<CustomProbeTag>()},
+                    Any = new[]
+                    {
+                        ComponentType.ReadOnly<AmbientProbeTag>(),
+                        ComponentType.ReadOnly<CustomProbeTag>(),
+                        ComponentType.ReadOnly<BlendProbeTag>()
+                    },
                     None = new[] {m_ComponentTypes[i]}
                 });
             }
@@ -39,7 +44,12 @@ namespace Unity.Rendering
             m_MissingProbeTagQuery = GetEntityQuery(new EntityQueryDesc
             {
                 Any = m_ComponentTypes,
-                None = new[] {ComponentType.ReadOnly<AmbientProbeTag>(), ComponentType.ReadOnly<CustomProbeTag>()}
+                None = new[]
+                {
+                    ComponentType.ReadOnly<AmbientProbeTag>(),
+                    ComponentType.ReadOnly<CustomProbeTag>(),
+                    ComponentType.ReadOnly<BlendProbeTag>()
+                }
             });
         }
 

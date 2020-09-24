@@ -6,11 +6,13 @@ using Unity.Mathematics;
 
 namespace Unity.Rendering
 {
-    [ConverterVersion("unity", 4)]
+    [ConverterVersion("unity", 5)]
     [WorldSystemFilter(WorldSystemFilterFlags.HybridGameObjectConversion)]
     class SkinnedMeshRendererConversion : GameObjectConversionSystem
     {
         const bool k_AttachToPrimaryEntityForSingleMaterial = false;
+        static int s_SkinMatrixIndexProperty = Shader.PropertyToID("_SkinMatrixIndex");
+        static int s_ComputeMeshIndexProperty = Shader.PropertyToID("_ComputeMeshIndex");
 
         protected override void OnUpdate()
         {
@@ -18,6 +20,18 @@ namespace Unity.Rendering
             Entities.ForEach((SkinnedMeshRenderer meshRenderer) =>
             {
                 meshRenderer.GetSharedMaterials(materials);
+                foreach (var material in materials)
+                {
+                    var supportsSkinning = material.HasProperty(s_SkinMatrixIndexProperty) || material.HasProperty(s_ComputeMeshIndexProperty);
+                    if (!supportsSkinning)
+                    {
+                        string errorMsg = "";
+                        errorMsg += $"Shader [{material.shader.name}] on [{meshRenderer.name}] does not support skinning. This can result in incorrect rendering.{System.Environment.NewLine}";
+                        errorMsg += $"Please see documentation for Linear Blend Skinning Node and Compute Deformation Node in Shader Graph.{System.Environment.NewLine}";
+                        Debug.LogError(errorMsg, meshRenderer);
+                    }
+                }
+
                 var mesh = meshRenderer.sharedMesh;
                 var root = meshRenderer.rootBone ? meshRenderer.rootBone : meshRenderer.transform;
                 var hasSkinning = mesh == null ? false : mesh.boneWeights.Length > 0 && mesh.bindposes.Length > 0;
@@ -25,7 +39,18 @@ namespace Unity.Rendering
                 var deformedEntity = GetPrimaryEntity(meshRenderer);
 
                 // Convert Renderers as normal MeshRenderers.
-                MeshRendererConversion.Convert(DstEntityManager, this, k_AttachToPrimaryEntityForSingleMaterial, meshRenderer, mesh, materials, root, meshRenderer.localBounds.ToAABB());
+                MeshRendererConversion.Convert(
+                    DstEntityManager,
+                    this,
+                    k_AttachToPrimaryEntityForSingleMaterial,
+                    meshRenderer,
+                    mesh,
+                    materials,
+                    null,
+                    default,
+                    meshRenderer.lightmapIndex,
+                    root,
+                    meshRenderer.localBounds.ToAABB());
 
                 foreach (var rendererEntity in GetEntities(meshRenderer))
                 {

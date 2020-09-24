@@ -16,10 +16,14 @@ namespace Unity.Rendering.Tests
         {
             var allocator = new HeapAllocator(1000);
 
+            allocator.DebugValidateInternalState();
+
             Assert.AreEqual(allocator.FreeSpace, 1000);
 
             HeapBlock b10  = allocator.Allocate(10);
+            allocator.DebugValidateInternalState();
             HeapBlock b100 = allocator.Allocate(100);
+            allocator.DebugValidateInternalState();
 
             // Check that the allocations have sufficient size.
             Assert.GreaterOrEqual(b10.Length, 10);
@@ -29,7 +33,9 @@ namespace Unity.Rendering.Tests
             Assert.LessOrEqual(allocator.FreeSpace, 1000 - 100 - 10);
 
             allocator.Release(b10);
+            allocator.DebugValidateInternalState();
             allocator.Release(b100);
+            allocator.DebugValidateInternalState();
 
             // Everything should now be freed.
             Assert.AreEqual(allocator.FreeSpace, 1000);
@@ -49,17 +55,25 @@ namespace Unity.Rendering.Tests
         public void Coalescing()
         {
             var allocator = new HeapAllocator(100);
+            allocator.DebugValidateInternalState();
 
             // Try to allocate ten blocks. These should succeed, because the heap should not be fragmented yet.
             var blocks10 = Enumerable.Range(0, 10).Select(x => allocator.Allocate(10)).ToArray();
+            allocator.DebugValidateInternalState();
+
             Assert.IsTrue(blocks10.All(b => b.Length == 10));
             Assert.IsTrue(allocator.Full);
 
             // Release all of them.
-            foreach (var b in blocks10) allocator.Release(b);
+            foreach (var b in blocks10)
+            {
+                allocator.Release(b);
+                allocator.DebugValidateInternalState();
+            }
 
             // Now try to allocate the entire heap. It should succeed, because everything has been freed.
             Assert.AreEqual(allocator.Allocate(100).Length, 100);
+            allocator.DebugValidateInternalState();
             allocator.Dispose();
         }
 
@@ -70,7 +84,7 @@ namespace Unity.Rendering.Tests
             const int NumBlocks = 1_000;
             const int NumRounds = 20;
             const int MaxAlloc = 10_000;
-            const int OperationsPerRound = 10_000;
+            const int OperationsPerRound = 4_000;
 
             int numAllocs   = 0;
             int numReleases = 0;
@@ -100,6 +114,7 @@ namespace Unity.Rendering.Tests
                     {
                         size = rnd.Next(1, MaxAlloc);
                         blocks[b] = allocator.Allocate((ulong)size);
+                        allocator.DebugValidateInternalState();
 
                         if (blocks[b].Empty)
                         {
@@ -117,6 +132,7 @@ namespace Unity.Rendering.Tests
                     {
                         size = -(int)blocks[b].Length;
                         allocator.Release(blocks[b]);
+                        allocator.DebugValidateInternalState();
                         blocks[b] = new HeapBlock();
 
                         ++numReleases;

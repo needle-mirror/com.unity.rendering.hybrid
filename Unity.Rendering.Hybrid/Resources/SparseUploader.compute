@@ -1,4 +1,5 @@
 #pragma kernel CopyKernel
+#pragma kernel ReplaceKernel
 
 static const uint kOperationType_Upload = 0;
 static const uint kOperationType_Matrix_4x4 = 1;
@@ -16,13 +17,27 @@ struct Operation
     uint count;
 };
 
-StructuredBuffer<Operation> operations;
-
 ByteAddressBuffer srcBuffer;
 RWByteAddressBuffer dstBuffer;
 
 // Place constants into globals so CBUFFER macros (and SRP headers) are not needed
 int operationsBase;
+int replaceOperationSize;
+
+Operation LoadOperation(int operationIndex)
+{
+    int offset = operationIndex * 6 * 4;
+
+    Operation operation;
+    operation.type           = srcBuffer.Load(offset + 0 * 4);
+    operation.srcOffset      = srcBuffer.Load(offset + 1 * 4);
+    operation.dstOffset      = srcBuffer.Load(offset + 2 * 4);
+    operation.dstOffsetExtra = srcBuffer.Load(offset + 3 * 4);
+    operation.size           = srcBuffer.Load(offset + 4 * 4);
+    operation.count          = srcBuffer.Load(offset + 5 * 4);
+
+    return operation;
+}
 
 #define GROUP_SIZE 64
 #define NUM_BYTES_PER_THREAD 4
@@ -233,7 +248,7 @@ void InverseMatricesToGPU_3x4(Operation operation, uint threadID)
 [numthreads(GROUP_SIZE, 1, 1)]
 void CopyKernel(uint threadID : SV_GroupThreadID, uint groupID : SV_GroupID)
 {
-    Operation operation = operations[operationsBase + groupID];
+    Operation operation = LoadOperation(operationsBase + groupID);
 
     if (operation.type == kOperationType_Upload)
         CopyToGPU(operation, threadID);
@@ -246,3 +261,18 @@ void CopyKernel(uint threadID : SV_GroupThreadID, uint groupID : SV_GroupID)
     else if (operation.type == kOperationType_Matrix_Inverse_3x4)
         InverseMatricesToGPU_3x4(operation, threadID);
 }
+
+[numthreads(GROUP_SIZE, 1, 1)]
+void ReplaceKernel(uint threadID : SV_GroupThreadID, uint groupID : SV_GroupID)
+{
+    Operation operation;
+    operation.type = kOperationType_Upload;
+    operation.srcOffset = 0;
+    operation.dstOffset = 0;
+    operation.dstOffsetExtra = 0;
+    operation.size = replaceOperationSize;
+    operation.count = 1;
+
+    CopyToGPU(operation, threadID);
+}
+

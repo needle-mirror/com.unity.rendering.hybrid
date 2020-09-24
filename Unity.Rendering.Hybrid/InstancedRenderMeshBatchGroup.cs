@@ -329,6 +329,7 @@ namespace Unity.Rendering
     public struct BatchCullingState
     {
         public int OutputCount;
+        public int InputCount;
     }
 
 
@@ -563,7 +564,7 @@ namespace Unity.Rendering
         public const int kFlagHasLodData = 1 << 0;
 
         public const int kFlagInstanceCulling = 1 << 1;
-
+        // size  // start - end offset
         // size  // start - end offset
         public short ChunkInstanceCount; //  2     0 - 2
         public short BatchOffset; //  2     2 - 4
@@ -690,7 +691,7 @@ namespace Unity.Rendering
             m_RemoveBatchMarker = new ProfilerMarker("BatchRendererGroup.Remove");
 
 #if UNITY_EDITOR
-            m_CullingStats = (CullingStats*)UnsafeUtility.Malloc(JobsUtility.MaxJobThreadCount * sizeof(CullingStats),
+            m_CullingStats = (CullingStats*)Memory.Unmanaged.Allocate(JobsUtility.MaxJobThreadCount * sizeof(CullingStats),
                 64, Allocator.Persistent);
 #endif
             m_MaterialPropertyBlocks = new List<MaterialPropertyBlock>();
@@ -780,7 +781,7 @@ namespace Unity.Rendering
         public void Dispose()
         {
 #if UNITY_EDITOR
-            UnsafeUtility.Free(m_CullingStats, Allocator.Persistent);
+            Memory.Unmanaged.Free(m_CullingStats, Allocator.Persistent);
 
             m_CullingStats = null;
 #endif

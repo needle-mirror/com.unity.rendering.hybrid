@@ -1,11 +1,42 @@
 # Change log
 
+## [0.10.0] - 2020-09-24
+
+### Added
+
+* Error message when trying to convert SkinnedMeshRenderer that is using a shader that does not support skinning.
+
+### Removed
+
+* HybridRendererSettings asset was removed since memory management for the hybrid renderer data buffer is now automatic.
+
+### Fixed
+
+* Fixed missing mesh breaking subscene conversion
+* Fixed chunk render bounds getting stale when RenderMesh shared component is changed.
+* Improved Hybrid V2 memory usage during GPU uploading.
+* Chunk render bounds getting stale when RenderMesh shared component is changed.
+* Reduced Hybrid V2 peak memory use when batches are deleted and created at the same time.
+
+## [0.9.0] - 2020-08-26
+
+### Added
+
+* Added: Hybrid component conversion support for: ParticleSystem and Volume+collider pairs (local volumes).
+* Hybrid component conversion support for: ParticleSystem and Volume+collider pairs (local volumes).
+
+### Fixed
+
+* Fixed parallel for checking errors in Hybrid Renderer jobs.
+* Fixed parallel for checking errors in occlusion jobs.
+
+
 ## [0.8.0] - 2020-08-04
 
 
 ### Changed
 
-* Changed SkinnedMeshRendererConversion to take the RootBone into account. The render entities are now parented to the RootBone entity instead of the SkinnedMeshRenderer GameObject entity. As a result the RenderBounds will update correctly when the root bone is transformed. 
+* Changed SkinnedMeshRendererConversion to take the RootBone into account. The render entities are now parented to the RootBone entity instead of the SkinnedMeshRenderer GameObject entity. As a result the RenderBounds will update correctly when the root bone is transformed.
 * Changed SkinnedMeshRendererConversion to compute the SkinMatrices in SkinnedMeshRenderer's root bone space instead of worldspace.
 
 ### Fixed
@@ -13,6 +44,7 @@
 * Fixed the Hybrid V2 uploading code not supporting more than 65535 separate upload operations per frame.
 * Fixed render bounds being offset on converted SkinnedMeshRenderers.
 * Partially fixed editor picking for Hybrid V2. Picking should now work in simple cases.
+* Fixed a memory leak in the HeapAllocator class used by Hybrid Renderer.
 
 
 

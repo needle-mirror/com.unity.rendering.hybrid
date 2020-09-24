@@ -240,15 +240,16 @@ Hybrid entities allow you to attach MonoBehaviour components to DOTS entities, w
 **The following hybrid components are supported by Hybrid Renderer:**
 * Light + HDAdditionalLightData (HDRP)
 * Light + UniversalAdditionalLightData (URP)
-* LightProbeProxyVolume 
 * ReflectionProbe + HDAdditionalReflectionData (HDRP)
 * TextMesh
 * SpriteRenderer
+* ParticleSystem
 * VisualEffect
 * DecalProjector (HDRP)
 * DensityVolume (HDRP)
 * PlanarReflectionProbe (HDRP)
 * Volume
+* Volume + Sphere/Box/Capsule/MeshCollider pair (local volumes) 
 
 Note that the conversion of Camera (+HDAdditionalCameraData, UniversalAdditionalCameraData) components is disabled by default, because the scene main camera can't be a hybrid entity. To enable this conversion, add **HYBRID_ENTITIES_CAMERA_CONVERSION** define to your project settings.
 

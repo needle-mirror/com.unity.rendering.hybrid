@@ -18,7 +18,6 @@ namespace Unity.Rendering
     namespace Authoring
     {
         [DisallowMultipleComponent]
-        [RequiresEntityConversion]
         [ConverterVersion("joe", 1)]
         public class MaterialColor : MonoBehaviour
         {

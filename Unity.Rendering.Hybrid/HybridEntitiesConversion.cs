@@ -16,72 +16,134 @@ using UnityEngine.Rendering.Universal;
 namespace Unity.Rendering
 {
 #if !TINY_0_22_0_OR_NEWER
+
+    [ConverterVersion("sebbi", 1)]
     [WorldSystemFilter(WorldSystemFilterFlags.HybridGameObjectConversion)]
-    public class LightConversionSystem : GameObjectConversionSystem
+    class HybridEntitiesConversion : GameObjectConversionSystem
     {
+        protected override void OnCreate()
+        {
+            base.OnCreate();
+            InitEntityQueryCache(20);       // To avoid debug log error about GC
+        }
+
         protected override void OnUpdate()
         {
-#if HDRP_7_0_0_OR_NEWER || !HDRP_7_0_0_OR_NEWER
             Entities.ForEach((Light light) =>
             {
                 AddHybridComponent(light);
                 ConfigureEditorRenderData(GetPrimaryEntity(light), light.gameObject, true);
             });
-#endif
 
-#if HDRP_7_0_0_OR_NEWER
-            Entities.ForEach((HDAdditionalLightData light) =>
-            {
-                AddHybridComponent(light);
-            });
-#endif
-
-#if URP_7_0_0_OR_NEWER
-            Entities.ForEach((UniversalAdditionalLightData vfx) =>
-            {
-                AddHybridComponent(vfx);
-            });
-#endif
-        }
-    }
-
-    [WorldSystemFilter(WorldSystemFilterFlags.HybridGameObjectConversion)]
-    public class LightProbeProxyVolumeConversionSystem : GameObjectConversionSystem
-    {
-        protected override void OnUpdate()
-        {
             Entities.ForEach((LightProbeProxyVolume group) =>
             {
                 AddHybridComponent(group);
             });
-        }
-    }
 
-    [WorldSystemFilter(WorldSystemFilterFlags.HybridGameObjectConversion)]
-    public class ReflectionProbeConversionSystem : GameObjectConversionSystem
-    {
-        protected override void OnUpdate()
-        {
             Entities.ForEach((ReflectionProbe probe) =>
             {
                 AddHybridComponent(probe);
             });
 
+            Entities.ForEach((TextMesh mesh, MeshRenderer renderer) =>
+            {
+                AddHybridComponent(mesh);
+                AddHybridComponent(renderer);
+            });
+
+            Entities.ForEach((SpriteRenderer sprite) =>
+            {
+                AddHybridComponent(sprite);
+            });
+
+            Entities.ForEach((VisualEffect vfx) =>
+            {
+                AddHybridComponent(vfx);
+            });
+
+            Entities.ForEach((ParticleSystem ps, ParticleSystemRenderer ren) =>
+            {
+                AddHybridComponent(ps);
+                AddHybridComponent(ren);
+            });
+
+#if SRP_7_0_0_OR_NEWER
+            Entities.ForEach((Volume volume) =>
+            {
+                AddHybridComponent(volume);
+            });
+
+            // NOTE: Colliders are only converted when a graphics Volume is on the same GameObject to avoid problems with Unity Physics!
+            Entities.ForEach((SphereCollider collider, Volume volume) =>
+            {
+                AddHybridComponent(collider);
+            });
+
+            Entities.ForEach((BoxCollider collider, Volume volume) =>
+            {
+                AddHybridComponent(collider);
+            });
+
+            Entities.ForEach((CapsuleCollider collider, Volume volume) =>
+            {
+                AddHybridComponent(collider);
+            });
+
+            Entities.ForEach((MeshCollider collider, Volume volume) =>
+            {
+                AddHybridComponent(collider);
+            });
+#endif
+
 #if HDRP_7_0_0_OR_NEWER
+            // HDRP specific extra data for Light
+            Entities.ForEach((HDAdditionalLightData light) =>
+            {
+                AddHybridComponent(light);
+            });
+
+            // HDRP specific extra data for ReflectionProbe
             Entities.ForEach((HDAdditionalReflectionData reflectionData) =>
             {
                 AddHybridComponent(reflectionData);
             });
+
+            Entities.ForEach((DecalProjector projector) =>
+            {
+                AddHybridComponent(projector);
+            });
+
+            Entities.ForEach((DensityVolume volume) =>
+            {
+                AddHybridComponent(volume);
+            });
+
+            Entities.ForEach((PlanarReflectionProbe probe) =>
+            {
+                AddHybridComponent(probe);
+            });
+			
+//This feature requires a modified HDRP
+//If ProbeVolumes are enabled, add PROBEVOLUME_CONVERSION
+//to the project script defines 
+#if PROBEVOLUME_CONVERSION
+            Entities.ForEach((ProbeVolume probe) =>
+            {
+                AddHybridComponent(probe);
+            });
+#endif			
 #endif
-        }
-    }
+
+#if URP_7_0_0_OR_NEWER
+            // URP specific extra data for Light
+            Entities.ForEach((UniversalAdditionalLightData vfx) =>
+            {
+                AddHybridComponent(vfx);
+            });
+#endif
 
 #if HYBRID_ENTITIES_CAMERA_CONVERSION
-    [WorldSystemFilter(WorldSystemFilterFlags.HybridGameObjectConversion)]
-    public class CameraConversionSystem : GameObjectConversionSystem
-    {
-        protected override void OnUpdate()
-        {
+            // Camera conversion is disabled by default, because Unity Editor loses track of the main camera if it's put into a subscene
             Entities.ForEach((Camera camera) =>
             {
                 AddHybridComponent(camera);
@@ -100,99 +162,11 @@ namespace Unity.Rendering
                 AddHybridComponent(data);
             });
 #endif
-        }
-    }
 #endif
-
-    [WorldSystemFilter(WorldSystemFilterFlags.HybridGameObjectConversion)]
-    public class TextMeshConversionSystem : GameObjectConversionSystem
-    {
-        protected override void OnUpdate()
-        {
-            Entities.ForEach((TextMesh mesh, MeshRenderer renderer) =>
-            {
-                AddHybridComponent(mesh);
-                AddHybridComponent(renderer);
-            });
         }
     }
 
-    [WorldSystemFilter(WorldSystemFilterFlags.HybridGameObjectConversion)]
-    public class SpriteRendererConversionSystem : GameObjectConversionSystem
-    {
-        protected override void OnUpdate()
-        {
-            Entities.ForEach((SpriteRenderer sprite) =>
-            {
-                AddHybridComponent(sprite);
-            });
-        }
-    }
-
-    [WorldSystemFilter(WorldSystemFilterFlags.HybridGameObjectConversion)]
-    public class VisualEffectConversionSystem : GameObjectConversionSystem
-    {
-        protected override void OnUpdate()
-        {
-            Entities.ForEach((VisualEffect vfx) =>
-            {
-                AddHybridComponent(vfx);
-            });
-        }
-    }
-
-#if HDRP_7_0_0_OR_NEWER
-    [WorldSystemFilter(WorldSystemFilterFlags.HybridGameObjectConversion)]
-    public class DecalProjectorConversionSystem : GameObjectConversionSystem
-    {
-        protected override void OnUpdate()
-        {
-            Entities.ForEach((DecalProjector projector) =>
-            {
-                AddHybridComponent(projector);
-            });
-        }
-    }
 #endif
-
-#if HDRP_7_0_0_OR_NEWER
-    [WorldSystemFilter(WorldSystemFilterFlags.HybridGameObjectConversion)]
-    public class DensityVolumeConversionSystem : GameObjectConversionSystem
-    {
-        protected override void OnUpdate()
-        {
-            Entities.ForEach((DensityVolume volume) =>
-            {
-                AddHybridComponent(volume);
-            });
-        }
     }
 
-    [WorldSystemFilter(WorldSystemFilterFlags.HybridGameObjectConversion)]
-    public class PlanarReflectionProbeConversionSystem : GameObjectConversionSystem
-    {
-        protected override void OnUpdate()
-        {
-            Entities.ForEach((PlanarReflectionProbe probe) =>
-            {
-                AddHybridComponent(probe);
-            });
-        }
-    }
-#endif
 
-#if SRP_7_0_0_OR_NEWER
-    [WorldSystemFilter(WorldSystemFilterFlags.HybridGameObjectConversion)]
-    public class VolumeConversionSystem : GameObjectConversionSystem
-    {
-        protected override void OnUpdate()
-        {
-            Entities.ForEach((Volume volume) =>
-            {
-                AddHybridComponent(volume);
-            });
-        }
-    }
-#endif
-#endif
-}

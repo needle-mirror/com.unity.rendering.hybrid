@@ -19,7 +19,6 @@ class Helper<T> : IHelper where T : struct, IComponentData
 }
 
 [DisallowMultipleComponent]
-[RequiresEntityConversion]
 [ExecuteInEditMode]
 [ConverterVersion("joe", 1)]
 public class MaterialOverride : MonoBehaviour

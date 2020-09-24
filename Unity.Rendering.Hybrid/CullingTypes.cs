@@ -18,7 +18,9 @@ namespace Unity.Rendering
         public const int kLodChunksTested = 8;
         public const int kCountRootLodsSelected = 9;
         public const int kCountRootLodsFailed = 10;
-        public const int kCount = 11;
+        public const int kCountOcclusionInput = 11;
+        public const int kCountOcclusionCulled = 12;
+        public const int kCount = 13;
         public fixed int Stats[kCount];
         public float CameraMoveDistance;
         public fixed int CacheLinePadding[15 - kCount];

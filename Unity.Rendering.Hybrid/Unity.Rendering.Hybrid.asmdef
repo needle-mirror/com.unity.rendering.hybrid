@@ -1,5 +1,6 @@
 {
     "name": "Unity.Rendering.Hybrid",
+    "rootNamespace": "",
     "references": [
         "Unity.Entities",
         "Unity.Entities.Hybrid",
@@ -11,9 +12,10 @@
         "Unity.Mathematics",
         "Unity.Mathematics.Extensions",
         "Unity.Mathematics.Extensions.Hybrid",
+        "Unity.MOC.Runtime",
         "Unity.RenderPipelines.HighDefinition.Runtime",
         "Unity.RenderPipelines.Universal.Runtime",
-        "Unity.RenderPipelines.Core.Runtime",		
+        "Unity.RenderPipelines.Core.Runtime",
         "Unity.Deformations",
         "Unity.Scenes"
     ],
@@ -74,6 +76,11 @@
             "name": "com.unity.tiny",
             "expression": "0.21.9",
             "define": "TINY_0_22_0_OR_NEWER"
+        },
+        {
+            "name": "com.unity.moc.native",
+            "expression": "0.0.0",
+            "define": "UNITY_MOC_NATIVE_AVAILABLE"
         }
     ],
     "noEngineReferences": false
