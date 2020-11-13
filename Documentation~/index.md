@@ -36,9 +36,15 @@ This package contains two versions of Hybrid Renderer:
 
 ### Feature support
 
-Hybrid Renderer V1 is no longer in active development, and the supported feature set for all render pipelines is limited. Hybrid Renderer V2 is early in development and some features are not yet supported, but we plan to support the full feature set.
+Hybrid Renderer V1 is no longer in active development and the supported feature set for all render pipelines is limited. Hybrid Renderer V2 is early in development and does not yet support every feature in URP or HDRP. The goal of Hybrid Renderer V2 is to eventually support the full URP and HDRP feature set.
 
-**Important:** Hybrid Renderer V2 is considered experimental in Unity 2020.1. It is not yet production ready and should only be used for evaluation and prototyping purposes. We have tested it on Windows DX11, DX12, Vulkan and Mac Metal backends in both Editor and Standalone builds. Mobile device and console platform support is planned for 2020.2 release. In order to get the latest Hybrid Renderer V2 fixes and features, upgrading to the latest Unity version will be required.
+In 2020, the focus for Hybrid Renderer was on editor platforms (Windows and Mac) to unblock DOTS content production. To help with stability and keep the editor platforms fully functional, Unity added automated testing for both Windows and Mac.
+
+For 2021, the focus is to make Hybrid Renderer ready for shipping applications on a broad range of devices. To help with this, the plan is to establish automated testing for mobile and console platforms.
+
+**Important:** Currently, Hybrid Renderer does not support desktop OpenGL or GLES. For Android and Linux, you should use Vulkan. However, be aware that the Vulkan drivers on many older Android devices are in a bad shape and will never be upgraded. This limits the platform coverage Hybrid Renderer can currently offer on Android devices.
+
+
 
 #### URP features
 
@@ -126,7 +132,9 @@ When the Hybrid Renderer package is installed in your Project, Hybrid Renderer V
 
 ### Setting up shaders for Hybrid Renderer V1
 
-Hybrid Renderer V1 only supports ShaderGraph based shaders. Built-in shaders such as HDRP/Lit are not supported.
+Hybrid Renderer V1 only supports ShaderGraph based shaders. It does not support built-in shaders such as HDRP/Lit.
+
+Note that Hybrid Renderer V1 requires at least one **Hybrid Instanced** property in each compatible Shader Graph shader. You don't need to use this property in the shader, but if the Shader Graph does not have at least one, the rendering might be corrupted on some platforms. Hybrid Renderer V2 does not include this restriction.
 
 * Enable **Enable GPU Instancing** on every material used with the Hybrid Renderer:
 ![](images/GPUInstancingMaterial.PNG)

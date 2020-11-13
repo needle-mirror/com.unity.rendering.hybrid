@@ -1,6 +1,5 @@
 #define DEBUG_LOG_HYBRID_V2
 // #define DEBUG_LOG_CHUNK_CHANGES
-// #define DEBUG_LOG_REFLECTION_TRIGGERED_RECREATE
 // #define DEBUG_LOG_TOP_LEVEL
 // #define DEBUG_LOG_BATCHES
 // #define DEBUG_LOG_BATCH_UPDATES
@@ -419,19 +418,19 @@ namespace Unity.Rendering
                 ~mask);
         }
 
-        public void ProcessChunk(ref HybridChunkInfo chunkInfo, ArchetypeChunk chunk, ChunkWorldRenderBounds chunkBounds)
+        public void ProcessChunk(in HybridChunkInfo chunkInfo, ArchetypeChunk chunk, ChunkWorldRenderBounds chunkBounds)
         {
 #if DEBUG_LOG_CHUNKS
             Debug.Log($"HybridChunkUpdater.ProcessChunk(internalBatchIndex: {chunkInfo.InternalIndex}, valid: {chunkInfo.Valid}, count: {chunk.Count}, chunk: {chunk.GetHashCode()})");
 #endif
 
             if (chunkInfo.Valid)
-                ProcessValidChunk(ref chunkInfo, chunk, chunkBounds.Value, false);
+                ProcessValidChunk(chunkInfo, chunk, chunkBounds.Value, false);
             else
-                DeferNewChunk(ref chunkInfo, chunk);
+                DeferNewChunk(chunkInfo, chunk);
         }
 
-        public unsafe void DeferNewChunk(ref HybridChunkInfo chunkInfo, ArchetypeChunk chunk)
+        public unsafe void DeferNewChunk(in HybridChunkInfo chunkInfo, ArchetypeChunk chunk)
         {
             if (chunk.Archetype.Prefab || chunk.Archetype.Disabled)
                 return;
@@ -443,7 +442,7 @@ namespace Unity.Rendering
             NewChunks[i] = chunk;
         }
 
-        public unsafe void ProcessValidChunk(ref HybridChunkInfo chunkInfo, ArchetypeChunk chunk,
+        public unsafe void ProcessValidChunk(in HybridChunkInfo chunkInfo, ArchetypeChunk chunk,
             MinMaxAABB chunkAABB, bool isNewChunk)
         {
             if (!isNewChunk)
@@ -657,12 +656,13 @@ namespace Unity.Rendering
     [BurstCompile]
     internal struct UpdateAllHybridChunksJob : IJobChunk
     {
-        public ComponentTypeHandle<HybridChunkInfo> HybridChunkInfo;
+        [ReadOnly] public ComponentTypeHandle<HybridChunkInfo> HybridChunkInfo;
         [ReadOnly] public ComponentTypeHandle<ChunkWorldRenderBounds> ChunkWorldRenderBounds;
         [ReadOnly] public ComponentTypeHandle<ChunkHeader> ChunkHeader;
         [ReadOnly] public ComponentTypeHandle<LocalToWorld> LocalToWorld;
         [ReadOnly] public ComponentTypeHandle<LODRange> LodRange;
         [ReadOnly] public ComponentTypeHandle<RootLODRange> RootLodRange;
+        [ReadOnly] public SharedComponentTypeHandle<RenderMesh> RenderMesh;
         public HybridChunkUpdater HybridChunkUpdater;
 
         public void Execute(ArchetypeChunk metaChunk, int chunkIndex, int firstEntityIndex)
@@ -678,16 +678,26 @@ namespace Unity.Rendering
                 var chunkInfo = hybridChunkInfos[i];
                 var chunkHeader = chunkHeaders[i];
 
+                var chunk = chunkHeader.ArchetypeChunk;
+
+                // Skip chunks that for some reason have HybridChunkInfo, but don't have the
+                // other required components. This should normally not happen, but can happen
+                // if the user manually deletes some components after the fact.
+                bool hasRenderMesh = chunk.Has(RenderMesh);
+                bool hasLocalToWorld = chunk.Has(LocalToWorld);
+                if (!hasRenderMesh || !hasLocalToWorld)
+                    continue;
+
                 ChunkWorldRenderBounds chunkBounds = chunkBoundsArray[i];
 
                 bool isNewChunk = !chunkInfo.Valid;
-                bool localToWorldChange = chunkHeader.ArchetypeChunk.DidChange<LocalToWorld>(LocalToWorld, HybridChunkUpdater.LastSystemVersion);
+                bool localToWorldChange = chunk.DidChange(LocalToWorld, HybridChunkUpdater.LastSystemVersion);
 
                 // When LOD ranges change, we must reset the movement grace to avoid using stale data
                 bool lodRangeChange =
-                    chunkHeader.ArchetypeChunk.DidOrderChange(HybridChunkUpdater.LastSystemVersion) |
-                    chunkHeader.ArchetypeChunk.DidChange<LODRange>(LodRange, HybridChunkUpdater.LastSystemVersion) |
-                    chunkHeader.ArchetypeChunk.DidChange<RootLODRange>(RootLodRange, HybridChunkUpdater.LastSystemVersion);
+                    chunk.DidOrderChange(HybridChunkUpdater.LastSystemVersion) |
+                    chunk.DidChange(LodRange, HybridChunkUpdater.LastSystemVersion) |
+                    chunk.DidChange(RootLodRange, HybridChunkUpdater.LastSystemVersion);
 
                 if (lodRangeChange)
                     chunkInfo.CullingData.MovementGraceFixed16 = 0;
@@ -696,8 +706,7 @@ namespace Unity.Rendering
                 if (!isNewChunk)
                     HybridChunkUpdater.MarkBatchForUpdates(chunkInfo.InternalIndex, localToWorldChange);
 
-                HybridChunkUpdater.ProcessChunk(ref chunkInfo, chunkHeader.ArchetypeChunk, chunkBounds);
-                hybridChunkInfos[i] = chunkInfo;
+                HybridChunkUpdater.ProcessChunk(chunkInfo, chunk, chunkBounds);
             }
 
             HybridChunkUpdater.FinishExecute();
@@ -707,7 +716,7 @@ namespace Unity.Rendering
     [BurstCompile]
     internal struct UpdateNewHybridChunksJob : IJobParallelFor
     {
-        public ComponentTypeHandle<HybridChunkInfo> HybridChunkInfo;
+        [ReadOnly] public ComponentTypeHandle<HybridChunkInfo> HybridChunkInfo;
         [ReadOnly] public ComponentTypeHandle<ChunkWorldRenderBounds> ChunkWorldRenderBounds;
 
         public NativeArray<ArchetypeChunk> NewChunks;
@@ -722,8 +731,7 @@ namespace Unity.Rendering
 
             Debug.Assert(chunkInfo.Valid, "Attempted to process a chunk with uninitialized Hybrid chunk info");
             HybridChunkUpdater.MarkBatchForUpdates(chunkInfo.InternalIndex, true);
-            HybridChunkUpdater.ProcessValidChunk(ref chunkInfo, chunk, chunkBounds.Value, true);
-            chunk.SetChunkComponentData(HybridChunkInfo, chunkInfo);
+            HybridChunkUpdater.ProcessValidChunk(chunkInfo, chunk, chunkBounds.Value, true);
             HybridChunkUpdater.FinishExecute();
         }
     }
@@ -1092,18 +1100,13 @@ namespace Unity.Rendering
 
         private EntityQuery m_CullingJobDependencyGroup;
         private EntityQuery m_CullingGroup;
-        private EntityQuery m_MissingHybridChunkInfo;
         private EntityQuery m_HybridRenderedQuery;
-        private EntityQuery m_DisabledRenderingQuery;
 
         private EntityQuery m_LodSelectGroup;
 
 #if UNITY_EDITOR
         private EditorRenderData m_DefaultEditorRenderData = new EditorRenderData
         {SceneCullingMask = UnityEditor.SceneManagement.EditorSceneManager.DefaultSceneCullingMask};
-
-        private uint m_PreviousDOTSReflectionVersionNumber = 0;
-
 #else
         private EditorRenderData m_DefaultEditorRenderData = new EditorRenderData { SceneCullingMask = ~0UL };
 #endif
@@ -1234,6 +1237,7 @@ namespace Unity.Rendering
         private Shader m_BuiltinErrorShader;
         private Material m_ErrorMaterial;
 #if UNITY_EDITOR
+        private TrackShaderReflectionChangesSystem m_ShaderReflectionChangesSystem;
         private Dictionary<Shader, bool> m_ShaderHasCompileErrors;
 #endif
 
@@ -1689,46 +1693,7 @@ namespace Unity.Rendering
                 ComponentType.ChunkComponentReadOnly<HybridChunkInfo>()
             );
 
-            m_MissingHybridChunkInfo = GetEntityQuery(new EntityQueryDesc
-            {
-                All = new[]
-                {
-                    ComponentType.ChunkComponentReadOnly<ChunkWorldRenderBounds>(),
-                    ComponentType.ReadOnly<WorldRenderBounds>(),
-                    ComponentType.ReadOnly<LocalToWorld>(),
-                    ComponentType.ReadOnly<RenderMesh>(),
-                },
-                None = new[]
-                {
-                    ComponentType.ChunkComponentReadOnly<HybridChunkInfo>(),
-                    ComponentType.ReadOnly<DisableRendering>(),
-                },
-                // TODO: Add chunk component to disabled entities and prefab entities to work around
-                // the fragmentation issue where entities are not added to existing chunks with chunk
-                // components. Remove this once chunk components don't affect archetype matching
-                // on entity creation.
-                Options = EntityQueryOptions.IncludeDisabled | EntityQueryOptions.IncludePrefab,
-            });
-
-            m_HybridRenderedQuery = GetEntityQuery(new EntityQueryDesc
-            {
-                All = new[]
-                {
-                    ComponentType.ChunkComponentReadOnly<ChunkWorldRenderBounds>(),
-                    ComponentType.ReadOnly<WorldRenderBounds>(),
-                    ComponentType.ReadOnly<LocalToWorld>(),
-                    ComponentType.ReadOnly<RenderMesh>(),
-                    ComponentType.ChunkComponent<HybridChunkInfo>(),
-                },
-            });
-
-            m_DisabledRenderingQuery = GetEntityQuery(new EntityQueryDesc
-            {
-                All = new[]
-                {
-                    ComponentType.ReadOnly<DisableRendering>(),
-                },
-            });
+            m_HybridRenderedQuery = GetEntityQuery(HybridUtils.GetHybridRenderedQueryDesc());
 
             m_LodSelectGroup = GetEntityQuery(new EntityQueryDesc
             {
@@ -1795,6 +1760,7 @@ namespace Unity.Rendering
                     {
                         ComponentType.ReadWrite<HybridChunkInfo>(),
                         ComponentType.ReadOnly<ChunkHeader>(),
+                        ComponentType.ReadOnly<ChunkWorldRenderBounds>(),
                     },
                 });
 
@@ -1999,63 +1965,39 @@ namespace Unity.Rendering
             Dispose();
         }
 
+        bool HasShaderReflectionChanged
+        {
+            get
+            {
+#if UNITY_EDITOR
+                return m_ShaderReflectionChangesSystem != null ? m_ShaderReflectionChangesSystem.HasReflectionChanged : false;
+#else
+                return false;
+#endif
+            }
+        }
+
+        void AlignWithShaderReflectionChanges()
+        {
+#if UNITY_EDITOR
+            // Reflection changing can imply that shader compile error status
+            // has also changed, so flush our cache.
+            if (HasShaderReflectionChanged)
+            {
+                m_ShaderHasCompileErrors = new Dictionary<Shader, bool>();
+            }
+#endif
+        }
+
         JobHandle UpdateHybridV2Batches(JobHandle inputDependencies)
         {
             if (m_FirstFrameAfterInit)
             {
                 OnFirstFrame();
                 m_FirstFrameAfterInit = false;
-#if UNITY_2020_1_OR_NEWER && UNITY_EDITOR
-                m_PreviousDOTSReflectionVersionNumber = HybridV2ShaderReflection.GetDOTSReflectionVersionNumber();
-#endif
             }
 
-#if UNITY_EDITOR
-            {
-#if UNITY_2020_1_OR_NEWER
-                uint reflectionVersionNumber = HybridV2ShaderReflection.GetDOTSReflectionVersionNumber();
-                bool reflectionChanged = reflectionVersionNumber != m_PreviousDOTSReflectionVersionNumber;
-#else
-                uint reflectionVersionNumber = 0;
-                bool reflectionChanged = false;
-#endif
-
-                if (HybridEditorTools.DebugSettings.RecreateAllBatches ||
-                    reflectionChanged)
-                {
-#if UNITY_EDITOR
-                    // Reflection changing can imply that shader compile error status
-                    // has also changed, so flush our cache.
-                    if (reflectionChanged)
-                        m_ShaderHasCompileErrors = new Dictionary<Shader, bool>();
-#endif
-                    EntityManager.RemoveChunkComponentData<HybridChunkInfo>(m_HybridRenderedQuery);
-
-                    Debug.Assert(m_HybridRenderedQuery.CalculateEntityCount() == 0,
-                        "Expected amount of renderable entities to be zero after deleting all HybridChunkInfo components");
-
-                    if (HybridEditorTools.DebugSettings.RecreateAllBatches)
-                    {
-                        Debug.Log("Recreate all batches requested, recreating hybrid batches");
-                    }
-                    else
-                    {
-#if DEBUG_LOG_REFLECTION_TRIGGERED_RECREATE
-                        Debug.Log("New shader reflection info detected, recreating hybrid batches");
-#endif
-                    }
-
-                    m_PreviousDOTSReflectionVersionNumber = reflectionVersionNumber;
-                }
-            }
-#endif
-
-            Profiler.BeginSample("AddMissingChunkComponents");
-            {
-                EntityManager.AddComponent(m_MissingHybridChunkInfo, ComponentType.ChunkComponent<HybridChunkInfo>());
-                EntityManager.RemoveChunkComponentData<HybridChunkInfo>(m_DisabledRenderingQuery);
-            }
-            Profiler.EndSample();
+            AlignWithShaderReflectionChanges();
 
             JobHandle done = default;
             Profiler.BeginSample("UpdateAllBatches");
@@ -2072,6 +2014,10 @@ namespace Unity.Rendering
 
         private void OnFirstFrame()
         {
+#if UNITY_EDITOR
+            m_ShaderReflectionChangesSystem = World.GetExistingSystem<TrackShaderReflectionChangesSystem>();
+#endif
+
             InitializeMaterialProperties();
 
 #if DEBUG_LOG_HYBRID_V2
@@ -2504,12 +2450,13 @@ namespace Unity.Rendering
 
             var updateAllJob = new UpdateAllHybridChunksJob
             {
-                HybridChunkInfo = GetComponentTypeHandle<HybridChunkInfo>(false),
+                HybridChunkInfo = GetComponentTypeHandle<HybridChunkInfo>(true),
                 ChunkWorldRenderBounds = GetComponentTypeHandle<ChunkWorldRenderBounds>(true),
                 ChunkHeader = GetComponentTypeHandle<ChunkHeader>(true),
                 LocalToWorld = GetComponentTypeHandle<LocalToWorld>(true),
                 LodRange = GetComponentTypeHandle<LODRange>(true),
                 RootLodRange = GetComponentTypeHandle<RootLODRange>(true),
+                RenderMesh = GetSharedComponentTypeHandle<RenderMesh>(),
                 HybridChunkUpdater = hybridChunkUpdater,
             };
 
@@ -2538,7 +2485,7 @@ namespace Unity.Rendering
                 var updateNewChunksJob = new UpdateNewHybridChunksJob
                 {
                     NewChunks = newChunks,
-                    HybridChunkInfo = GetComponentTypeHandle<HybridChunkInfo>(false),
+                    HybridChunkInfo = GetComponentTypeHandle<HybridChunkInfo>(true),
                     ChunkWorldRenderBounds = GetComponentTypeHandle<ChunkWorldRenderBounds>(true),
                     HybridChunkUpdater = hybridChunkUpdater,
                 };
@@ -3358,11 +3305,11 @@ namespace Unity.Rendering
                 material = m_ErrorMaterial;
 
                 if (material != null)
-                    Debug.LogWarning("WARNING: Hybrid Renderer using error shader for batch with an erroneous material.");
+                    Debug.LogWarning($"WARNING: Hybrid Renderer using error shader for batch with an erroneous material. Mesh: {createInfo.RenderMesh.mesh}, Material: {createInfo.RenderMesh.material}");
             }
             else if (!createInfo.Valid)
             {
-                Debug.LogWarning("WARNING: Hybrid Renderer skipping a batch due to invalid RenderMesh.");
+                Debug.LogWarning($"WARNING: Hybrid Renderer skipping a batch due to invalid RenderMesh. Mesh: {createInfo.RenderMesh.mesh}, Material: {createInfo.RenderMesh.material}");
                 return false;
             }
 
@@ -3370,7 +3317,7 @@ namespace Unity.Rendering
             // the error material.
             if (material == null)
             {
-                Debug.LogWarning("WARNING: Hybrid Renderer skipping a batch due to no valid material.");
+                Debug.LogWarning($"WARNING: Hybrid Renderer skipping a batch due to no valid material. Mesh: {createInfo.RenderMesh.mesh}, Material: {createInfo.RenderMesh.material}");
                 return false;
             }
 
@@ -3422,7 +3369,7 @@ namespace Unity.Rendering
 #endif
 
             CullingComponentTypes batchCullingComponentTypes = new CullingComponentTypes
-            {                
+            {
                 RootLODRanges = GetComponentTypeHandle<RootLODRange>(true),
                 RootLODWorldReferencePoints = GetComponentTypeHandle<RootLODWorldReferencePoint>(true),
                 LODRanges = GetComponentTypeHandle<LODRange>(true),

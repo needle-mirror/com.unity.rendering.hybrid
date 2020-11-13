@@ -398,9 +398,9 @@ namespace Unity.Rendering
 
             for (int i = 0; i < numFree; ++i)
             {
+                m_FenceBufferPool.PutBufferId(m_FrameData[i].m_FenceBuffer);
                 while (m_FrameData[i].m_Buffers.Count > 0)
                 {
-                    m_FenceBufferPool.PutBufferId(m_FrameData[i].m_FenceBuffer);
                     var buffer = m_FrameData[i].m_Buffers.Pop();
                     m_UploadBufferPool.PutBufferId(buffer);
                 }

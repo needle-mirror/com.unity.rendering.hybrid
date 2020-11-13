@@ -52,6 +52,12 @@ namespace Unity.Rendering
         public bool FlipWinding;
 
         /// <summary>
+        /// Determines what kinds of light probes the entity will use, if any.
+        /// Corresponds to <see cref="Renderer.lightProbeUsage"/>.
+        /// </summary>
+        public LightProbeUsage LightProbeUsage;
+
+        /// <summary>
         /// Construct a <see cref="RenderMeshDescription"/> using defaults from the given
         /// <see cref="Renderer"/> and <see cref="Mesh"/> objects.
         /// </summary>
@@ -100,6 +106,13 @@ namespace Unity.Rendering
             RenderingLayerMask = renderer.renderingLayerMask;
             FlipWinding = false;
             MotionMode = motionVectorGenerationMode;
+
+            var staticLightingMode = RenderMeshUtility.StaticLightingModeFromRenderer(renderer);
+            var lightProbeUsage = renderer.lightProbeUsage;
+
+            LightProbeUsage = (staticLightingMode == StaticLightingMode.LightProbes)
+                ? lightProbeUsage
+                : LightProbeUsage.Off;
         }
 
         /// <summary>
@@ -113,7 +126,8 @@ namespace Unity.Rendering
             MotionVectorGenerationMode motionVectorGenerationMode = MotionVectorGenerationMode.Camera,
             int layer = 0,
             int subMeshIndex = 0,
-            uint renderingLayerMask = 1)
+            uint renderingLayerMask = 1,
+            LightProbeUsage lightProbeUsage = LightProbeUsage.Off)
         {
             Debug.Assert(material != null, "Must have a non-null Material to create RenderMeshDescription.");
             Debug.Assert(mesh != null, "Must have a non-null Mesh to create RenderMeshDescription.");
@@ -136,6 +150,7 @@ namespace Unity.Rendering
             RenderingLayerMask = renderingLayerMask;
             FlipWinding = false;
             MotionMode = motionVectorGenerationMode;
+            LightProbeUsage = lightProbeUsage;
         }
 
         /// <summary>
@@ -155,23 +170,30 @@ namespace Unity.Rendering
 
             if (RenderMesh.mesh == null)
             {
-                Debug.LogWarning("RenderMesh must have a valid non-null Mesh.");
+                Debug.LogWarning($"RenderMesh must have a valid non-null Mesh. Mesh: {RenderMesh.mesh}, Material: {RenderMesh.material}");
                 valid = false;
             }
             else if (RenderMesh.subMesh < 0 || RenderMesh.subMesh >= RenderMesh.mesh.subMeshCount)
             {
-                Debug.LogWarning("RenderMesh subMesh index out of bounds.");
+                Debug.LogWarning($"RenderMesh subMesh index out of bounds. Mesh: {RenderMesh.mesh}, Material: {RenderMesh.material}");
                 valid = false;
             }
 
             if (RenderMesh.material == null)
             {
-                Debug.LogWarning("RenderMesh must have a valid non-null Material.");
+                Debug.LogWarning($"RenderMesh must have a valid non-null Material. Mesh: {RenderMesh.mesh}, Material: {RenderMesh.material}");
                 valid = false;
             }
 
             return valid;
         }
+    }
+
+    internal enum StaticLightingMode
+    {
+        None = 0,
+        LightMapped = 1,
+        LightProbes = 2,
     }
 
     /// <summary>
@@ -226,6 +248,10 @@ namespace Unity.Rendering
 #if USE_HYBRID_BUILTIN_LIGHTDATA
             ComponentType.ReadWrite<BuiltinMaterialPropertyUnity_LightData>(),
 #endif
+
+#if URP_9_0_0_OR_NEWER
+            ComponentType.ReadWrite<BuiltinMaterialPropertyUnity_SpecCube0_HDR>(),
+#endif
         });
 
         private static ComponentTypes kHybridComponentsWithMotion = new ComponentTypes(new ComponentType[]
@@ -268,6 +294,10 @@ namespace Unity.Rendering
 #else
             ComponentType.ReadWrite<BuiltinMaterialPropertyUnity_MotionVectorsParams>(),
 #endif
+#endif
+
+#if URP_9_0_0_OR_NEWER
+            ComponentType.ReadWrite<BuiltinMaterialPropertyUnity_SpecCube0_HDR>(),
 #endif
         });
 
@@ -434,6 +464,8 @@ namespace Unity.Rendering
 #if !DISABLE_HYBRID_TRANSPARENCY_BATCH_PARTITIONING
             PartitionTransparentObjects(entity, entityManager, renderMeshDescription.RenderMesh);
 #endif
+
+            AddLightProbeComponents(entity, entityManager, renderMeshDescription);
 #endif
         }
 
@@ -564,6 +596,8 @@ namespace Unity.Rendering
                     Value = new float4(0, 0, 1, 0)
                 });
             }
+
+            AddLightProbeComponents(entity, ecb, renderMeshDescription);
 #endif
         }
 #pragma warning restore CS0162
@@ -592,6 +626,44 @@ namespace Unity.Rendering
                     PartitionValue = (ulong) transparentPartitionValue.x |
                                      ((ulong) transparentPartitionValue.y << 32),
                 });
+            }
+        }
+
+        private static void AddLightProbeComponents(
+            Entity entity,
+            EntityManager entityManager,
+            in RenderMeshDescription renderMeshDescription)
+        {
+            switch (renderMeshDescription.LightProbeUsage)
+            {
+                default:
+                    entityManager.AddComponent<AmbientProbeTag>(entity);
+                    break;
+                case LightProbeUsage.BlendProbes:
+                    entityManager.AddComponent<BlendProbeTag>(entity);
+                    break;
+                case LightProbeUsage.CustomProvided:
+                    entityManager.AddComponent<CustomProbeTag>(entity);
+                    break;
+            }
+        }
+
+        private static void AddLightProbeComponents(
+            Entity entity,
+            EntityCommandBuffer ecb,
+            in RenderMeshDescription renderMeshDescription)
+        {
+            switch (renderMeshDescription.LightProbeUsage)
+            {
+                default:
+                    ecb.AddComponent<AmbientProbeTag>(entity);
+                    break;
+                case LightProbeUsage.BlendProbes:
+                    ecb.AddComponent<BlendProbeTag>(entity);
+                    break;
+                case LightProbeUsage.CustomProvided:
+                    ecb.AddComponent<CustomProbeTag>(entity);
+                    break;
             }
         }
 
@@ -624,6 +696,17 @@ namespace Unity.Rendering
 #else
             return false;
 #endif
+        }
+
+        internal static StaticLightingMode StaticLightingModeFromRenderer(Renderer renderer)
+        {
+            var staticLightingMode = StaticLightingMode.None;
+            if (renderer.lightmapIndex >= 65534 || renderer.lightmapIndex < 0)
+                staticLightingMode = StaticLightingMode.LightProbes;
+            else if (renderer.lightmapIndex >= 0)
+                staticLightingMode = StaticLightingMode.LightMapped;
+
+            return staticLightingMode;
         }
     }
 }

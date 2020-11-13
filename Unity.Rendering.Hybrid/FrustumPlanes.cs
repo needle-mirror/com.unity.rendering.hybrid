@@ -121,8 +121,8 @@ namespace Unity.Rendering
                 float4 distances = dot4(p.Xs, p.Ys, p.Zs, mx, my, mz) + p.Distances;
                 float4 radii = dot4(ex, ey, ez, math.abs(p.Xs), math.abs(p.Ys), math.abs(p.Zs));
 
-                outCounts += (int4)(distances + radii <= 0);
-                inCounts += (int4)(distances > radii);
+                outCounts += (int4)(distances + radii < 0);
+                inCounts += (int4)(distances >= radii);
             }
 
             int inCount = math.csum(inCounts);
