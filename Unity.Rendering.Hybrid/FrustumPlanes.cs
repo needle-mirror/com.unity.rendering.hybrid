@@ -95,7 +95,12 @@ namespace Unity.Rendering
                 p.Xs[i & 3] = 1.0f;
                 p.Ys[i & 3] = 0.0f;
                 p.Zs[i & 3] = 0.0f;
-                p.Distances[i & 3] = 32786.0f; //float.MaxValue;
+
+                // This value was before hardcoded to 32786.0f.
+                // It was causing the culling system to discard the rendering of entities having a X coordinate approximately less than -32786.
+                // We could not find anything relying on this number, so the value has been increased to 1 billion
+                p.Distances[i & 3] = 1e9f;
+
                 planes[i >> 2] = p;
             }
 
