@@ -102,12 +102,11 @@ namespace Unity.Rendering.Occlusion
         public void Execute(ArchetypeChunk chunk, int chunkIndex, int firstEntityIndex)
         {
             var meshes = chunk.GetNativeArray(OcclusionMeshComponent);
-            //var localToWorld = chunk.GetNativeArray(LocalToWorldComponent);
 
             for (int i = 0; i < chunk.Count; i++)
             {
                 var mesh = meshes[i];
-                mesh.Transform(math.mul(ViewProjection, mesh.localToWorld));// localToWorld[i].Value));
+                mesh.Transform(math.mul(ViewProjection, mesh.localToWorld));
                 meshes[i] = mesh;
 
                 // Running on 1 job, this is ok for now
@@ -163,7 +162,7 @@ namespace Unity.Rendering.Occlusion
                 int index = indices[entityIndex] - chunkData.BatchOffset;
 
                 var mesh = meshes[index];
-                mesh.Transform(math.mul(ViewProjection, mesh.localToWorld));// localToWorld[index].Value));
+                mesh.Transform(math.mul(ViewProjection, mesh.localToWorld));
                 meshes[index] = mesh;
 
                 // Running on 1 job, this is ok for now

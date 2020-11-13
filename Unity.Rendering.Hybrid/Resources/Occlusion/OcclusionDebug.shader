@@ -70,11 +70,10 @@ Shader "Hidden/OcclusionDebug"
                     col.a = 1.0f;
                 #endif
 
-                    float dx = ddx(i.z);
-                    float dy = ddy(i.z);
-                    //if (dx * dx + dy * dy > 0.1f)
-                      //  col.rgb = 0;
-                    col.rgb *= 0.00001 / (abs(dx) + abs(dy));
+                float dx = ddx(i.z);
+                float dy = ddy(i.z);
+                col.rgb *= 0.00001 / (abs(dx) + abs(dy));
+
                 FrameOut result;
                 result.color = col;
                 result.depth = i.z;

@@ -93,6 +93,7 @@ namespace Unity.Rendering.Tests
             var rnd = new System.Random(293875);
             var allocator = new HeapAllocator(HeapSize);
             var blocks = Enumerable.Range(0, NumBlocks).Select(x => new HeapBlock()).ToArray();
+            var blockEnds = new SortedSet<ulong>();
 
             // Stress test the allocator by doing a bunch of random allocs and deallocs and
             // try to verify that allocator internal asserts don't fire, and free space behaves
@@ -124,6 +125,8 @@ namespace Unity.Rendering.Tests
                         else
                         {
                             size = (int)blocks[b].Length;
+                            bool added = blockEnds.Add(blocks[b].end);
+                            Assert.IsTrue(added);
                         }
 
                         ++numAllocs;
@@ -133,14 +136,21 @@ namespace Unity.Rendering.Tests
                         size = -(int)blocks[b].Length;
                         allocator.Release(blocks[b]);
                         allocator.DebugValidateInternalState();
+                        bool removed = blockEnds.Remove(blocks[b].end);
+                        Assert.IsTrue(removed);
                         blocks[b] = new HeapBlock();
 
                         ++numReleases;
                     }
 
                     ulong after = allocator.FreeSpace;
+                    ulong highest = allocator.OnePastHighestUsedAddress;
 
                     Assert.AreEqual((long)after, (long)before - size);
+                    if (blockEnds.Count > 0)
+                        Assert.AreEqual(blockEnds.Max, highest);
+                    else
+                        Assert.AreEqual(0, highest);
                 }
 
                 for (int b = 0; b < NumBlocks; ++b)
@@ -149,6 +159,7 @@ namespace Unity.Rendering.Tests
                     {
                         allocator.Release(blocks[b]);
                         blocks[b] = new HeapBlock();
+                        blockEnds.Clear();
                     }
                 }
                 Assert.IsTrue(allocator.Empty);

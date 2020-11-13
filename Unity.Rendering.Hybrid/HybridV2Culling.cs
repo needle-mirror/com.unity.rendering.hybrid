@@ -69,8 +69,10 @@ namespace Unity.Rendering
     {
         [ReadOnly] public LODGroupExtensions.LODParams LODParams;
         [ReadOnly] public NativeArray<byte> ForceLowLOD;
-        [ReadOnly] public ComponentTypeHandle<RootLodRequirement> RootLodRequirements;
-        [ReadOnly] public ComponentTypeHandle<LodRequirement> InstanceLodRequirements;
+        [ReadOnly] public ComponentTypeHandle<RootLODRange> RootLODRanges;
+        [ReadOnly] public ComponentTypeHandle<RootLODWorldReferencePoint> RootLODReferencePoints;
+        [ReadOnly] public ComponentTypeHandle<LODRange> LODRanges;
+        [ReadOnly] public ComponentTypeHandle<LODWorldReferencePoint> LODReferencePoints;
         public ushort CameraMoveDistanceFixed16;
         public float DistanceScale;
         public bool DistanceScaleChanged;
@@ -149,23 +151,26 @@ namespace Unity.Rendering
 #endif
                         var chunk = chunkHeader.ArchetypeChunk;
 
-                        var rootLodRequirements = chunk.GetNativeArray(RootLodRequirements);
-                        var instanceLodRequirements = chunk.GetNativeArray(InstanceLodRequirements);
+                        var rootLODRanges = chunk.GetNativeArray(RootLODRanges);
+                        var rootLODReferencePoints = chunk.GetNativeArray(RootLODReferencePoints);
+                        var lodRanges = chunk.GetNativeArray(LODRanges);
+                        var lodReferencePoints = chunk.GetNativeArray(LODReferencePoints);
 
                         float graceDistance = float.MaxValue;
 
                         for (int i = 0; i < chunkInstanceCount; i++)
                         {
-                            var rootLodRequirement = rootLodRequirements[i];
+                            var rootLODRange = rootLODRanges[i];
+                            var rootLODReferencePoint = rootLODReferencePoints[i];
 
                             var rootLodDistance =
                                 math.select(
                                     DistanceScale *
-                                    math.length(LODParams.cameraPos - rootLodRequirement.LOD.WorldReferencePosition),
+                                    math.length(LODParams.cameraPos - rootLODReferencePoint.Value),
                                     DistanceScale, isOrtho);
 
-                            float rootMinDist = math.select(rootLodRequirement.LOD.MinDist, 0.0f, forceLowLOD == 1);
-                            float rootMaxDist = rootLodRequirement.LOD.MaxDist;
+                            float rootMinDist = math.select(rootLODRange.LOD.MinDist, 0.0f, forceLowLOD == 1);
+                            float rootMaxDist = rootLODRange.LOD.MaxDist;
 
                             graceDistance = math.min(math.abs(rootLodDistance - rootMinDist), graceDistance);
                             graceDistance = math.min(math.abs(rootLodDistance - rootMaxDist), graceDistance);
@@ -174,21 +179,23 @@ namespace Unity.Rendering
 
                             if (rootLodIntersect)
                             {
-                                var instanceLodRequirement = instanceLodRequirements[i];
+                                var lodRange = lodRanges[i];
+                                var lodReferencePoint = lodReferencePoints[i];
+
                                 var instanceDistance =
                                     math.select(
                                         DistanceScale *
                                         math.length(LODParams.cameraPos -
-                                            instanceLodRequirement.WorldReferencePosition), DistanceScale,
+                                            lodReferencePoint.Value), DistanceScale,
                                         isOrtho);
 
                                 var instanceLodIntersect =
-                                    (instanceDistance < instanceLodRequirement.MaxDist) &&
-                                    (instanceDistance >= instanceLodRequirement.MinDist);
+                                    (instanceDistance < lodRange.MaxDist) &&
+                                    (instanceDistance >= lodRange.MinDist);
 
-                                graceDistance = math.min(math.abs(instanceDistance - instanceLodRequirement.MinDist),
+                                graceDistance = math.min(math.abs(instanceDistance - lodRange.MinDist),
                                     graceDistance);
-                                graceDistance = math.min(math.abs(instanceDistance - instanceLodRequirement.MaxDist),
+                                graceDistance = math.min(math.abs(instanceDistance - lodRange.MaxDist),
                                     graceDistance);
 
                                 if (instanceLodIntersect)
@@ -251,7 +258,7 @@ namespace Unity.Rendering
         [NativeDisableParallelForRestriction] public NativeArray<BatchVisibility> Batches;
         public const uint kMaxEntitiesPerChunk = 128;
         [NativeDisableParallelForRestriction] public NativeArray<int> ThreadLocalIndexLists;
-        
+
 #pragma warning disable 649
         [NativeSetThreadIndex] public int ThreadIndex;
 #pragma warning restore 649

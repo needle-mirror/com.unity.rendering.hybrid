@@ -6,29 +6,38 @@ using Unity.Mathematics;
 
 namespace Unity.Rendering
 {
-    [ConverterVersion("unity", 5)]
+    // SkinnedMeshRendererConversion is public so UpdateBefore and UpdateAfter can be used with it.
+    // It contains no public methods of its own.
+    [ConverterVersion("unity", 6)]
     [WorldSystemFilter(WorldSystemFilterFlags.HybridGameObjectConversion)]
-    class SkinnedMeshRendererConversion : GameObjectConversionSystem
+    public sealed class SkinnedMeshRendererConversion : GameObjectConversionSystem
     {
-        const bool k_AttachToPrimaryEntityForSingleMaterial = false;
         static int s_SkinMatrixIndexProperty = Shader.PropertyToID("_SkinMatrixIndex");
         static int s_ComputeMeshIndexProperty = Shader.PropertyToID("_ComputeMeshIndex");
 
         protected override void OnUpdate()
         {
             var materials = new List<Material>(10);
+            var context = new RenderMeshConversionContext(DstEntityManager, this)
+            {
+                AttachToPrimaryEntityForSingleMaterial = false,
+            };
+
             Entities.ForEach((SkinnedMeshRenderer meshRenderer) =>
             {
                 meshRenderer.GetSharedMaterials(materials);
                 foreach (var material in materials)
                 {
+                    if (material == null)
+                        continue;
+
                     var supportsSkinning = material.HasProperty(s_SkinMatrixIndexProperty) || material.HasProperty(s_ComputeMeshIndexProperty);
                     if (!supportsSkinning)
                     {
                         string errorMsg = "";
                         errorMsg += $"Shader [{material.shader.name}] on [{meshRenderer.name}] does not support skinning. This can result in incorrect rendering.{System.Environment.NewLine}";
                         errorMsg += $"Please see documentation for Linear Blend Skinning Node and Compute Deformation Node in Shader Graph.{System.Environment.NewLine}";
-                        Debug.LogError(errorMsg, meshRenderer);
+                        Debug.LogWarning(errorMsg, meshRenderer);
                     }
                 }
 
@@ -39,18 +48,8 @@ namespace Unity.Rendering
                 var deformedEntity = GetPrimaryEntity(meshRenderer);
 
                 // Convert Renderers as normal MeshRenderers.
-                MeshRendererConversion.Convert(
-                    DstEntityManager,
-                    this,
-                    k_AttachToPrimaryEntityForSingleMaterial,
-                    meshRenderer,
-                    mesh,
-                    materials,
-                    null,
-                    default,
-                    meshRenderer.lightmapIndex,
-                    root,
-                    meshRenderer.localBounds.ToAABB());
+                // No need to process light maps as skinned objects are never light mapped.
+                context.Convert(meshRenderer, mesh, materials, root);
 
                 foreach (var rendererEntity in GetEntities(meshRenderer))
                 {
@@ -61,6 +60,8 @@ namespace Unity.Rendering
                         DstEntityManager.AddComponentData(rendererEntity, new DeformedMeshIndex());
 #endif
                         DstEntityManager.AddComponentData(rendererEntity, new DeformedEntity { Value = deformedEntity });
+
+                        DstEntityManager.AddComponentData(rendererEntity, new RenderBounds { Value = meshRenderer.localBounds.ToAABB() });
 
                         if (hasSkinning)
                             DstEntityManager.AddComponent<SkinningTag>(rendererEntity);
@@ -102,6 +103,8 @@ namespace Unity.Rendering
                     }
                 }
             });
+
+            context.EndConversion();
         }
     }
 }

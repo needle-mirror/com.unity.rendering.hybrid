@@ -49,7 +49,7 @@ namespace Unity.Rendering
 #if ENABLE_COMPUTE_DEFORMATIONS
             if (!UnityEngine.SystemInfo.supportsComputeShaders)
             {
-                UnityEngine.Debug.LogError("Current platform does not support compute shaders. Compute shaders are required for Compute Deformations. Remove the 'ENABLE_COMPUTE_DEFORMATIONS' define from Player settings to disable Compute Deformation systems.");
+                UnityEngine.Debug.LogWarning("Warning: Current platform does not support compute shaders. Compute shaders are required for Compute Deformations. Compute Deformation systems will be disabled.");
                 Enabled = false;
                 return;
             }

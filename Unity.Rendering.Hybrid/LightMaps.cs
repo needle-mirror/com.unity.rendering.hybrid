@@ -49,7 +49,9 @@ namespace Unity.Rendering
                 return null;
 
             var result = new Texture2DArray(data.width, data.height, source.Count, source[0].graphicsFormat, TextureCreationFlags.MipChain);
-            result.filterMode = FilterMode.Bilinear;
+            result.filterMode = FilterMode.Trilinear;
+            result.wrapMode = TextureWrapMode.Clamp;
+            result.anisoLevel = 3;
 
             for (var sliceIndex = 0; sliceIndex < source.Count; sliceIndex++)
             {

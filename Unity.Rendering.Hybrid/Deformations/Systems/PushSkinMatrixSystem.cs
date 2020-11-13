@@ -9,7 +9,7 @@ using Debug = UnityEngine.Debug;
 
 namespace Unity.Rendering
 {
-    public abstract class PrepareSkinMatrixSystemBase : JobComponentSystem
+    public abstract partial class PrepareSkinMatrixSystemBase : JobComponentSystem
     {
         static readonly ProfilerMarker k_Marker = new ProfilerMarker("PrepareSkinMatrixSystemBase");
 

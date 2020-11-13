@@ -26,7 +26,9 @@ namespace Unity.Rendering.Occlusion
 #endif
         }
 
+#if UNITY_MOC_NATIVE_AVAILABLE
         private MOCOcclusionMode m_MocOcclusionMode = MOCOcclusionMode.Intrinsic;
+#endif
 
         public MOCOcclusionMode MocOcclusionMode
         {

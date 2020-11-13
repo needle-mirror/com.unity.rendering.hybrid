@@ -56,7 +56,9 @@ namespace Unity.Rendering
         public uint MinimumAlignment { get { return 1u << m_MinimumAlignmentLog2; } }
         public ulong FreeSpace { get { return m_Free; } }
         public ulong UsedSpace { get { return m_Size - m_Free; } }
-        public ulong OnePastHighestUsedAddress { get { return m_FreeEndpoints[m_Size]; } }
+        public ulong OnePastHighestUsedAddress { get {
+            return m_FreeEndpoints.TryGetValue(m_Size, out var tailBegin) ? tailBegin : m_Size;
+        } }
         public ulong Size { get { return m_Size; } }
         public bool Empty { get { return m_Free == m_Size; } }
         public bool Full { get { return m_Free == 0; } }

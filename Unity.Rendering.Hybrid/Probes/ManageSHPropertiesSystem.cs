@@ -1,4 +1,4 @@
-#if ENABLE_HYBRID_RENDERER_V2 && URP_9_0_0_OR_NEWER
+#if ENABLE_HYBRID_RENDERER_V2
 using System;
 using Unity.Entities;
 using UnityEngine;
@@ -34,8 +34,8 @@ namespace Unity.Rendering
                     Any = new[]
                     {
                         ComponentType.ReadOnly<AmbientProbeTag>(),
-                        ComponentType.ReadOnly<CustomProbeTag>(),
-                        ComponentType.ReadOnly<BlendProbeTag>()
+                        ComponentType.ReadOnly<BlendProbeTag>(),
+                        ComponentType.ReadOnly<CustomProbeTag>()
                     },
                     None = new[] {m_ComponentTypes[i]}
                 });
@@ -47,8 +47,8 @@ namespace Unity.Rendering
                 None = new[]
                 {
                     ComponentType.ReadOnly<AmbientProbeTag>(),
-                    ComponentType.ReadOnly<CustomProbeTag>(),
-                    ComponentType.ReadOnly<BlendProbeTag>()
+                    ComponentType.ReadOnly<BlendProbeTag>(),
+                    ComponentType.ReadOnly<CustomProbeTag>()
                 }
             });
         }

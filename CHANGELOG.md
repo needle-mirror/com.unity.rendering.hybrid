@@ -1,5 +1,35 @@
 # Change log
 
+## [0.11.0] - 2020-11-13
+
+### Added
+
+* Frame queuing limiting solution to avoid hazards in the GPU uploader
+* Hybrid V2 should now render objects with errors (e.g. missing or broken material) as bright magenta when the used SRP contains compatible error shaders, and display warnings.
+* Support for lightmaps in hybrid renderer. You will need to bake with subscenes open, upon closing the lightmaps will be converted into the subscene. (Note: Requires release 10.1.0 of graphics packages).
+* Support for lightprobes in hybrid renderer. Entities can dynamically look up the the current ambient probe or probe grid. (Note: Requires release 10.1.0 of graphics packages).
+* Added error message when total used GPU memory is bigger than some backends can handle (1 GiB)
+* HybridBatchPartition shared component that can force entities into separate batches.
+* It is now possible to override DOTS instanced material properties using `ISharedComponentData`.
+* RenderMeshDescription and RenderMeshUtility.AddComponent APIs to efficiently create Hybrid Rendered entities.
+
+### Changed
+
+* Log warning instead of error message when shader on SMR does not support DOTS Skinning
+* Update minimum editor version to 2020.1.2f1
+
+### Fixed
+
+* Fixed float2 and float3 material properties like HDRP emissive color to work correctly.
+* GPU buffer now grows by doubling, so initial startup lag is reduced.
+* GPU resources are now cleaned up better in case of internal exceptions, leading to less errors in subsequent frames.
+* Hybrid Renderer forces entities using URP and HDRP transparent materials into separate batches, so they are rendered in the correct order and produce correct rendering results.
+* Fixed a bug with motion vector parameters not getting set correctly.
+* HLOD conversion code now properly handles uninitialized components
+* Removed internal frame queuing and replace it with frame fencing. Hybrid renderer will now longer wait for GPU buffers to be available, making it easier to see if you are GPU or CPU bound and avoiding some potential deadlocks.
+* Disable deformation systems when no graphics device is present instead of throwing error.
+* Fixed a bug with converting ambient light probe settings from GameObjects.
+
 ## [0.10.0] - 2020-09-24
 
 ### Added

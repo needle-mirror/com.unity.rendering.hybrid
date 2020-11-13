@@ -1,4 +1,5 @@
 using Unity.Entities;
+using UnityEngine.Rendering;
 
 namespace Unity.Rendering
 {
@@ -9,7 +10,19 @@ namespace Unity.Rendering
 #else
     [UpdateBefore(typeof(RenderMeshSystemV2))]
 #endif
-    public class DeformationsInPresentation : ComponentSystemGroup { }
+    public class DeformationsInPresentation : ComponentSystemGroup
+    {
+        protected override void OnCreate()
+        {
+            if (UnityEngine.SystemInfo.graphicsDeviceType == GraphicsDeviceType.Null)
+            {
+                UnityEngine.Debug.LogWarning("Warning: No Graphics Device found. Deformation systems will not run.");
+                Enabled = false;
+            }
+
+            base.OnCreate();
+        }
+    }
 
 
     [UnityEngine.ExecuteAlways]
@@ -20,7 +33,7 @@ namespace Unity.Rendering
     [UpdateInGroup(typeof(DeformationsInPresentation))]
     [UpdateAfter(typeof(PushMeshDataSystem))]
     [UpdateBefore(typeof(FinalizePushSkinMatrixSystem))]
-    public class PrepareSkinMatrixSystem : PrepareSkinMatrixSystemBase { }
+    public partial class PrepareSkinMatrixSystem : PrepareSkinMatrixSystemBase { }
 
     [UnityEngine.ExecuteAlways]
     [UpdateInGroup(typeof(DeformationsInPresentation))]

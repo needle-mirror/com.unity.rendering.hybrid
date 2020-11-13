@@ -25,7 +25,8 @@ namespace Unity.Rendering
                 DstEntityManager.AddComponent(hlodEntity, ComponentType.ReadWrite<HLODComponent>());
 
                 var LODCount = lodGroup.lodCount;
-                if (LODCount != hlod.LODParentTransforms.Length)
+                var expectedLodCount = hlod.LODParentTransforms?.Length ?? 0;
+                if (LODCount != expectedLodCount)
                 {
                     Debug.LogWarning("HLOD out of sync with LODGroup", hlod);
                     return;
@@ -35,6 +36,11 @@ namespace Unity.Rendering
                 {
                     var childGroups = hlod.CalculateLODGroups(i);
                     var HLODMask = 1 << i;
+
+                    foreach (var childGroup in childGroups)
+                    {
+                        DeclareDependency(childGroup.gameObject, hlod.gameObject);
+                    }
 
                     foreach (var childGroup in childGroups)
                     {

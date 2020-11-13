@@ -19,6 +19,10 @@ namespace Unity.Rendering
         public float3    LocalReferencePoint;
     }
 
+    struct LODGroupWorldReferencePoint : IComponentData
+    {
+        public float3 Value;
+    }
 
     public struct HLODComponent : IComponentData
     {
@@ -27,6 +31,7 @@ namespace Unity.Rendering
     public struct MeshLODComponent : IComponentData
     {
         public Entity   Group;
+        public Entity   ParentGroup;
         public int      LODMask;
     }
 }

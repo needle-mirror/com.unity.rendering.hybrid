@@ -38,6 +38,11 @@ public class MaterialOverrideAsset : ScriptableObject
                 //                and HDRPMaterialPropertyBaseColor. It actually shouldn't matter which one is used can they can work either shader.
                 foreach (var attr in t.Type.GetCustomAttributes(typeof(MaterialPropertyAttribute), false))
                 {
+                    if (TypeManager.IsSharedComponentType(t.TypeIndex))
+                    {
+                        continue;
+                    }
+
                     var propAttr = (MaterialPropertyAttribute)attr;
                     MaterialPropertyFormat propFormat = 0;
                     //TODO(andrew.theisen): So this won't use exisiting IComponentDatas always. for example:

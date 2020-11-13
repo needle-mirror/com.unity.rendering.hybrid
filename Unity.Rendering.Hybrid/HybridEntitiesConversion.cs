@@ -32,7 +32,15 @@ namespace Unity.Rendering
             Entities.ForEach((Light light) =>
             {
                 AddHybridComponent(light);
-                ConfigureEditorRenderData(GetPrimaryEntity(light), light.gameObject, true);
+                var entity = GetPrimaryEntity(light);
+                ConfigureEditorRenderData(entity, light.gameObject, true);
+
+#if UNITY_2020_2_OR_NEWER && UNITY_EDITOR
+                // Explicitly store the LightBakingOutput using a component, so we can restore it
+                // at runtime.
+                var bakingOutput = light.bakingOutput;
+                DstEntityManager.AddComponentData(entity, new LightBakingOutputData {Value = bakingOutput});
+#endif
             });
 
             Entities.ForEach((LightProbeProxyVolume group) =>
@@ -99,7 +107,10 @@ namespace Unity.Rendering
             // HDRP specific extra data for Light
             Entities.ForEach((HDAdditionalLightData light) =>
             {
-                AddHybridComponent(light);
+#if UNITY_2020_2_OR_NEWER && UNITY_EDITOR
+                if (light.GetComponent<Light>().lightmapBakeType != LightmapBakeType.Baked)
+#endif
+                    AddHybridComponent(light);
             });
 
             // HDRP specific extra data for ReflectionProbe
@@ -122,23 +133,26 @@ namespace Unity.Rendering
             {
                 AddHybridComponent(probe);
             });
-			
+
 //This feature requires a modified HDRP
 //If ProbeVolumes are enabled, add PROBEVOLUME_CONVERSION
-//to the project script defines 
+//to the project script defines
 #if PROBEVOLUME_CONVERSION
             Entities.ForEach((ProbeVolume probe) =>
             {
                 AddHybridComponent(probe);
             });
-#endif			
+#endif
 #endif
 
 #if URP_7_0_0_OR_NEWER
             // URP specific extra data for Light
-            Entities.ForEach((UniversalAdditionalLightData vfx) =>
+            Entities.ForEach((UniversalAdditionalLightData light) =>
             {
-                AddHybridComponent(vfx);
+#if UNITY_2020_2_OR_NEWER && UNITY_EDITOR
+                if (light.GetComponent<Light>().lightmapBakeType != LightmapBakeType.Baked)
+#endif
+                    AddHybridComponent(light);
             });
 #endif
 

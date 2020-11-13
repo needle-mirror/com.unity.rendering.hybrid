@@ -30,7 +30,9 @@ class HLODGroupSectionSplitConversion : GameObjectConversionSystem
             {
                 // Lowest LOD in section 0, everything else in section 1
                 section.Section = (i == lodCount - 1) ? 0 : 1;
-                RecursivelySetSection(hlod.LODParentTransforms[i], section);
+                var lodParent = hlod.LODParentTransforms[i];
+                if (lodParent != null)
+                    RecursivelySetSection(hlod.LODParentTransforms[i], section);
             }
         });
     }

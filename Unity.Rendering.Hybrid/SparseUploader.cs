@@ -225,27 +225,91 @@ namespace Unity.Rendering
         }
     }
 
+    internal class BufferPool : IDisposable
+    {
+        private List<ComputeBuffer> m_Buffers;
+        private Stack<int> m_FreeBufferIds;
+
+        private int m_Count;
+        private int m_Stride;
+        private ComputeBufferType m_Type;
+        private ComputeBufferMode m_Mode;
+
+
+        public BufferPool(int count, int stride, ComputeBufferType type = ComputeBufferType.Default, ComputeBufferMode mode = ComputeBufferMode.Immutable)
+        {
+            m_Buffers = new List<ComputeBuffer>();
+            m_FreeBufferIds = new Stack<int>();
+
+            m_Count = count;
+            m_Stride = stride;
+            m_Type = type;
+            m_Mode = mode;
+        }
+
+        public void Dispose()
+        {
+            for (int i = 0; i < m_Buffers.Count; ++i)
+            {
+                m_Buffers[i].Dispose();
+            }
+        }
+
+        private int AllocateBuffer()
+        {
+            var id = m_Buffers.Count;
+            var cb = new ComputeBuffer(m_Count, m_Stride, m_Type, m_Mode);
+            m_Buffers.Add(cb);
+            return id;
+        }
+
+        public int GetBufferId()
+        {
+            if (m_FreeBufferIds.Count == 0)
+                return AllocateBuffer();
+
+            return m_FreeBufferIds.Pop();
+        }
+
+        public ComputeBuffer GetBufferFromId(int id)
+        {
+            return m_Buffers[id];
+        }
+
+        public void PutBufferId(int id)
+        {
+            m_FreeBufferIds.Push(id);
+        }
+    }
+
     public unsafe struct SparseUploader : IDisposable
     {
         const int k_MaxThreadGroupsPerDispatch = 65535;
 
-        int m_NumBufferedFrames;
-
-        // Below is a frame queueing limiting hack to avoid overwriting live buffers
-        // This will be removed once we have actual queries to the GPU what frame has passed
-        ComputeBuffer[] m_LimitingBuffers;
-        AsyncGPUReadbackRequest[] m_LimitingRequests;
-
         int m_BufferChunkSize;
-
-        int m_CurrFrame;
 
         ComputeBuffer m_DestinationBuffer;
 
-        List<ComputeBuffer> m_UploadBuffers;
+        BufferPool m_FenceBufferPool;
+        BufferPool m_UploadBufferPool;
+
         NativeArray<MappedBuffer> m_MappedBuffers;
-        Stack<int> m_FreeBuffers;
-        Stack<int>[] m_FrameReuseBuffers;
+
+        class FrameData
+        {
+            public Stack<int> m_Buffers;
+            public int m_FenceBuffer;
+            public AsyncGPUReadbackRequest m_Fence;
+
+            public FrameData()
+            {
+                m_Buffers = new Stack<int>();
+                m_FenceBuffer = -1;
+            }
+        }
+
+        Stack<FrameData> m_FreeFrameData;
+        List<FrameData> m_FrameData;
 
         ThreadedSparseUploaderData* m_ThreadData;
 
@@ -260,44 +324,15 @@ namespace Unity.Rendering
 
         public SparseUploader(ComputeBuffer destinationBuffer, int bufferChunkSize = 16 * 1024 * 1024)
         {
-            if (SystemInfo.graphicsDeviceType == GraphicsDeviceType.Metal)
-                m_NumBufferedFrames = 4; // metal is hardcoded to 4
-            else
-                m_NumBufferedFrames = 3; // We use 3 to be safe, but the default value is 2.
-
-#if !DISABLE_HYBRID_RENDERER_V2_FRAME_LIMIT
-            // initialize frame queue limitation if we have async readback
-            // if async readback is not available we have to fallback to frame counting
-            if (SystemInfo.supportsAsyncGPUReadback)
-            {
-                m_LimitingBuffers = new ComputeBuffer[m_NumBufferedFrames];
-                m_LimitingRequests = new AsyncGPUReadbackRequest[m_NumBufferedFrames];
-                for (var i = 0; i < m_NumBufferedFrames; i++)
-                {
-                    m_LimitingBuffers[i] = new ComputeBuffer(1, 4, ComputeBufferType.Default);
-                    m_LimitingRequests[i] = AsyncGPUReadback.Request(m_LimitingBuffers[i]);
-                }
-            }
-            else
-#endif
-            {
-                m_LimitingBuffers = null;
-                m_LimitingRequests = null;
-            }
-
             m_BufferChunkSize = bufferChunkSize;
-            m_CurrFrame = 0;
 
             m_DestinationBuffer = destinationBuffer;
 
-            m_UploadBuffers = new List<ComputeBuffer>();
+            m_FenceBufferPool = new BufferPool(1, 4);
+            m_UploadBufferPool = new BufferPool(m_BufferChunkSize / 4, 4, ComputeBufferType.Raw, ComputeBufferMode.SubUpdates);
             m_MappedBuffers = new NativeArray<MappedBuffer>();
-            m_FreeBuffers = new Stack<int>();
-            m_FrameReuseBuffers = new Stack<int>[m_NumBufferedFrames];
-            for (int i = 0; i < m_NumBufferedFrames; ++i)
-            {
-                m_FrameReuseBuffers[i] = new Stack<int>();
-            }
+            m_FreeFrameData = new Stack<FrameData>();
+            m_FrameData = new List<FrameData>();
 
             m_ThreadData = (ThreadedSparseUploaderData*)Memory.Unmanaged.Allocate(sizeof(ThreadedSparseUploaderData),
                 UnsafeUtility.AlignOf<ThreadedSparseUploaderData>(), Allocator.Persistent);
@@ -317,18 +352,9 @@ namespace Unity.Rendering
 
         public void Dispose()
         {
-            ReleaseAllUploadBuffers();
+            m_FenceBufferPool.Dispose();
+            m_UploadBufferPool.Dispose();
             Memory.Unmanaged.Free(m_ThreadData, Allocator.Persistent);
-
-#if !DISABLE_HYBRID_RENDERER_V2_FRAME_LIMIT
-            if (SystemInfo.supportsAsyncGPUReadback)
-            {
-                for (var i = 0; i < m_LimitingRequests.Length; i++)
-                    m_LimitingRequests[i].WaitForCompletion();
-                for (var i = 0; i < m_LimitingBuffers.Length; i++)
-                   m_LimitingBuffers[i].Dispose();
-            }
-#endif
         }
 
         public void ReplaceBuffer(ComputeBuffer buffer, bool copyFromPrevious = false)
@@ -348,49 +374,49 @@ namespace Unity.Rendering
             m_DestinationBuffer = buffer;
         }
 
-        private void ReleaseAllUploadBuffers()
-        {
-            for (int i = 0; i < m_UploadBuffers.Count; ++i)
-            {
-                m_UploadBuffers[i].Dispose();
-            }
-        }
 
-        private int AllocateComputeBuffer()
+        private void RecoverBuffers()
         {
-            var id = m_UploadBuffers.Count;
-            var cb = new ComputeBuffer(m_BufferChunkSize / 4, 4, ComputeBufferType.Raw, ComputeBufferMode.SubUpdates);
-            m_UploadBuffers.Add(cb);
-            return id;
-        }
-
-        private void EnsurePreallocatedComputeBuffers(int numBuffersNeeded)
-        {
-            while (m_FreeBuffers.Count < numBuffersNeeded)
-            {
-                var id = AllocateComputeBuffer();
-                m_FreeBuffers.Push(id);
-            }
-        }
-
-        public unsafe ThreadedSparseUploader Begin(int maxDataSizeInBytes, int biggestDataUpload, int maxOperationCount)
-        {
-#if !DISABLE_HYBRID_RENDERER_V2_FRAME_LIMIT
+            var numFree = 0;
             if (SystemInfo.supportsAsyncGPUReadback)
             {
-                m_LimitingRequests[m_CurrFrame].WaitForCompletion();
-                m_LimitingRequests[m_CurrFrame] = AsyncGPUReadback.Request(m_LimitingBuffers[m_CurrFrame]);
+                for (int i = 0; i < m_FrameData.Count; ++i)
+                {
+                    if (m_FrameData[i].m_Fence.done)
+                    {
+                        numFree = i + 1;
+                    }
+                }
             }
-#endif
-
-            // First: recover all buffers from the previous frames (if any)
-            // TODO: handle change in QualitySettings.maxQueuedFrames
-            var currStack = m_FrameReuseBuffers[m_CurrFrame];
-            while (currStack.Count != 0)
+            else
             {
-                var buffer = currStack.Pop();
-                m_FreeBuffers.Push(buffer);
+                // Platform does not support async readbacks so we assume 3 frames in flight and once building on CPU
+                // always pop one from the frame data queue
+                if (m_FrameData.Count > 3)
+                    numFree = 1;
             }
+
+            for (int i = 0; i < numFree; ++i)
+            {
+                while (m_FrameData[i].m_Buffers.Count > 0)
+                {
+                    m_FenceBufferPool.PutBufferId(m_FrameData[i].m_FenceBuffer);
+                    var buffer = m_FrameData[i].m_Buffers.Pop();
+                    m_UploadBufferPool.PutBufferId(buffer);
+                }
+                m_FreeFrameData.Push(m_FrameData[i]);
+            }
+
+            if (numFree > 0)
+            {
+                m_FrameData.RemoveRange(0, numFree);
+            }
+        }
+
+        public ThreadedSparseUploader Begin(int maxDataSizeInBytes, int biggestDataUpload, int maxOperationCount)
+        {
+            // First: recover all buffers from the previous frames (if any)
+            RecoverBuffers();
 
             // Second: calculate total size needed this frame, allocate buffers and map what is needed
             var operationSize = UnsafeUtility.SizeOf<Operation>();
@@ -398,7 +424,6 @@ namespace Unity.Rendering
             var sizeNeeded = maxOperationSizeInBytes + maxDataSizeInBytes;
             var bufferSizeWithMaxPaddingRemoved = m_BufferChunkSize - operationSize - biggestDataUpload;
             var numBuffersNeeded = (sizeNeeded + bufferSizeWithMaxPaddingRemoved - 1) / bufferSizeWithMaxPaddingRemoved;
-            EnsurePreallocatedComputeBuffers(numBuffersNeeded);
 
             if (numBuffersNeeded < 0)
                 numBuffersNeeded = 0;
@@ -407,8 +432,8 @@ namespace Unity.Rendering
 
             for(int i = 0; i < numBuffersNeeded; ++i)
             {
-                var id = m_FreeBuffers.Pop();
-                var cb = m_UploadBuffers[id];
+                var id = m_UploadBufferPool.GetBufferId();
+                var cb = m_UploadBufferPool.GetBufferFromId(id);
                 var data = cb.BeginWrite<byte>(0, m_BufferChunkSize);
                 var marker = MappedBuffer.PackMarker(0, m_BufferChunkSize);
                 m_MappedBuffers[i] = new MappedBuffer
@@ -445,16 +470,25 @@ namespace Unity.Rendering
             }
         }
 
+        private void StepFrame()
+        {
+            // TODO: release safety handle of thread data
+            m_ThreadData->m_Buffers = null;
+            m_ThreadData->m_NumBuffers = 0;
+            m_ThreadData->m_CurrBuffer = 0;
+        }
+
         public void EndAndCommit(ThreadedSparseUploader tsu)
         {
             var numBuffers = m_ThreadData->m_NumBuffers;
+            var frameData = m_FreeFrameData.Count > 0 ? m_FreeFrameData.Pop() : new FrameData();
             for (int iBuf = 0; iBuf < numBuffers; ++iBuf)
             {
                 var mappedBuffer = m_MappedBuffers[iBuf];
                 MappedBuffer.UnpackMarker(mappedBuffer.m_Marker, out var operationOffset, out var dataOffset);
                 var numOps = (int) (operationOffset / UnsafeUtility.SizeOf<Operation>());
                 var computeBufferID = mappedBuffer.m_BufferID;
-                var computeBuffer = m_UploadBuffers[computeBufferID];
+                var computeBuffer = m_UploadBufferPool.GetBufferFromId(computeBufferID);
 
                 if (numOps > 0)
                 {
@@ -462,24 +496,51 @@ namespace Unity.Rendering
 
                     DispatchUploads(numOps, computeBuffer);
 
-                    m_FrameReuseBuffers[m_CurrFrame].Push(computeBufferID);
+                    frameData.m_Buffers.Push(computeBufferID);
                 }
                 else
                 {
                     computeBuffer.EndWrite<byte>(0);
-                    m_FreeBuffers.Push(computeBufferID);
+                    m_UploadBufferPool.PutBufferId(computeBufferID);
                 }
+            }
+
+            if (SystemInfo.supportsAsyncGPUReadback)
+            {
+                var fenceBufferId = m_FenceBufferPool.GetBufferId();
+                frameData.m_FenceBuffer = fenceBufferId;
+                frameData.m_Fence = AsyncGPUReadback.Request(m_FenceBufferPool.GetBufferFromId(fenceBufferId));
+            }
+
+            m_FrameData.Add(frameData);
+
+            m_MappedBuffers.Dispose();
+
+            StepFrame();
+        }
+
+        public void FrameCleanup()
+        {
+            var numBuffers = m_ThreadData->m_NumBuffers;
+
+            if (numBuffers == 0)
+                return;
+
+            // These buffers where never used, so they gets returned to the pool at once
+            for (int iBuf = 0; iBuf < numBuffers; ++iBuf)
+            {
+                var mappedBuffer = m_MappedBuffers[iBuf];
+                MappedBuffer.UnpackMarker(mappedBuffer.m_Marker, out var operationOffset, out var dataOffset);
+                var computeBufferID = mappedBuffer.m_BufferID;
+                var computeBuffer = m_UploadBufferPool.GetBufferFromId(computeBufferID);
+
+                computeBuffer.EndWrite<byte>(0);
+                m_UploadBufferPool.PutBufferId(computeBufferID);
             }
 
             m_MappedBuffers.Dispose();
 
-            m_CurrFrame += 1;
-            if (m_CurrFrame >= m_NumBufferedFrames)
-                m_CurrFrame = 0;
-            // TODO: release safety handle of thread data
-            m_ThreadData->m_Buffers = null;
-            m_ThreadData->m_NumBuffers = 0;
-            m_ThreadData->m_CurrBuffer = 0;
+            StepFrame();
         }
     }
 }

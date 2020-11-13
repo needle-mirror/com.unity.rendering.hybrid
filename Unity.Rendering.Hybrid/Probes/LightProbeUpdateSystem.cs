@@ -1,12 +1,13 @@
+#if ENABLE_HYBRID_RENDERER_V2
+
 using System.Collections.Generic;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Entities;
-using Unity.Jobs;
 using Unity.Transforms;
 using UnityEngine;
-
-#if false
+using UnityEngine.Profiling;
+using UnityEngine.Rendering;
 
 namespace Unity.Rendering
 {
@@ -15,20 +16,17 @@ namespace Unity.Rendering
     [AlwaysUpdateSystem]
     class LightProbeUpdateSystem : SystemBase
     {
-        private EntityQuery m_Query;
-        private Dictionary<JobHandle, LightProbesQuery> m_ScheduledJobs = new Dictionary<JobHandle, LightProbesQuery>(100);
+        EntityQuery m_ProbeGridQuery;
+        EntityQuery m_AmbientProbQuery;
+        SphericalHarmonicsL2 m_LastAmbientProbe;
 
-        private bool m_UpdateAll = true;
-
-        private void NeedUpdate()
-        {
-            m_UpdateAll = true;
-        }
+        private ComponentType[] gridQuertyFilter = {ComponentType.ReadOnly<LocalToWorld>(), ComponentType.ReadWrite<BlendProbeTag>()};
+        private ComponentType[] gridQuertyFilterForAmbient = { ComponentType.ReadWrite<BlendProbeTag>() };
+        private ComponentType[] ambientQuertyFilter = {ComponentType.ReadWrite<AmbientProbeTag>()};
 
         protected override void OnCreate()
         {
-            LightProbes.lightProbesUpdated += NeedUpdate;
-            m_Query = GetEntityQuery(
+            m_ProbeGridQuery = GetEntityQuery(
                 ComponentType.ReadWrite<BuiltinMaterialPropertyUnity_SHAr>(),
                 ComponentType.ReadWrite<BuiltinMaterialPropertyUnity_SHAg>(),
                 ComponentType.ReadWrite<BuiltinMaterialPropertyUnity_SHAb>(),
@@ -39,78 +37,145 @@ namespace Unity.Rendering
                 ComponentType.ReadOnly<LocalToWorld>(),
                 ComponentType.ReadOnly<BlendProbeTag>()
             );
-            m_Query.SetChangedVersionFilter(ComponentType.ReadOnly<LocalToWorld>());
-        }
+            m_ProbeGridQuery.SetChangedVersionFilter(gridQuertyFilter);
 
-        protected override void OnDestroy()
-        {
-            LightProbes.lightProbesUpdated -= NeedUpdate;
-
-            foreach (var query in m_ScheduledJobs)
-            {
-                query.Key.Complete();
-                query.Value.Dispose();
-            }
-            m_ScheduledJobs.Clear();
+            m_AmbientProbQuery = GetEntityQuery(
+                ComponentType.ReadOnly<AmbientProbeTag>(),
+                ComponentType.ReadWrite<BuiltinMaterialPropertyUnity_SHAr>(),
+                ComponentType.ReadWrite<BuiltinMaterialPropertyUnity_SHAg>(),
+                ComponentType.ReadWrite<BuiltinMaterialPropertyUnity_SHAb>(),
+                ComponentType.ReadWrite<BuiltinMaterialPropertyUnity_SHBr>(),
+                ComponentType.ReadWrite<BuiltinMaterialPropertyUnity_SHBg>(),
+                ComponentType.ReadWrite<BuiltinMaterialPropertyUnity_SHBb>(),
+                ComponentType.ReadWrite<BuiltinMaterialPropertyUnity_SHC>());
+            m_AmbientProbQuery.SetChangedVersionFilter(ambientQuertyFilter);
         }
 
         protected override void OnUpdate()
         {
-            CleanUpCompletedJobs();
+            // if we have valid grid use that...
+            var probes = LightmapSettings.lightProbes;
+            var ambientProbe = RenderSettings.ambientProbe;
+            bool validGrid = probes != null && probes.count != 0;
 
-            var lightProbesQuery = new LightProbesQuery(Allocator.Persistent);
+            if (validGrid)
+            { 
+                UpdateEntitiesFromGrid();
+            }
 
-            if (m_UpdateAll)
-                m_Query.ResetFilter();
+            // update ambients
+            UpdateEntitiesFromAmbientProbe(this, m_AmbientProbQuery, ambientQuertyFilter, ambientProbe, m_LastAmbientProbe);
+
+            // if there is no valid grid - instead use ambient probe for all entities
+            if (!validGrid)
+            {
+                m_ProbeGridQuery.SetChangedVersionFilter(gridQuertyFilterForAmbient);
+                UpdateEntitiesFromAmbientProbe(this, m_ProbeGridQuery, gridQuertyFilterForAmbient, ambientProbe, m_LastAmbientProbe);
+            }
+
+            m_LastAmbientProbe = ambientProbe;
+        }
+
+        private static void UpdateEntitiesFromAmbientProbe(
+            LightProbeUpdateSystem system,
+            EntityQuery query,
+            ComponentType[] queryFilter,
+            SphericalHarmonicsL2 ambientProbe,
+            SphericalHarmonicsL2 lastProbe)
+        {
+            Profiler.BeginSample("UpdateEntitiesFromAmbientProbe");
+            var updateAll = ambientProbe != lastProbe;
+            if (updateAll)
+            { 
+                query.ResetFilter();
+            }
 
             var job = new UpdateSHValuesJob
             {
-                lightProbesQuery = lightProbesQuery,
-                SHArType = GetComponentTypeHandle<BuiltinMaterialPropertyUnity_SHAr>(),
-                SHAgType = GetComponentTypeHandle<BuiltinMaterialPropertyUnity_SHAg>(),
-                SHAbType = GetComponentTypeHandle<BuiltinMaterialPropertyUnity_SHAb>(),
-                SHBrType = GetComponentTypeHandle<BuiltinMaterialPropertyUnity_SHBr>(),
-                SHBgType = GetComponentTypeHandle<BuiltinMaterialPropertyUnity_SHBg>(),
-                SHBbType = GetComponentTypeHandle<BuiltinMaterialPropertyUnity_SHBb>(),
-                SHCType = GetComponentTypeHandle<BuiltinMaterialPropertyUnity_SHC>(),
-                LocalToWorldType = GetComponentTypeHandle<LocalToWorld>(),
+                Properties = new SHProperties(ambientProbe),
+                SHArType = system.GetComponentTypeHandle<BuiltinMaterialPropertyUnity_SHAr>(),
+                SHAgType = system.GetComponentTypeHandle<BuiltinMaterialPropertyUnity_SHAg>(),
+                SHAbType = system.GetComponentTypeHandle<BuiltinMaterialPropertyUnity_SHAb>(),
+                SHBrType = system.GetComponentTypeHandle<BuiltinMaterialPropertyUnity_SHBr>(),
+                SHBgType = system.GetComponentTypeHandle<BuiltinMaterialPropertyUnity_SHBg>(),
+                SHBbType = system.GetComponentTypeHandle<BuiltinMaterialPropertyUnity_SHBb>(),
+                SHCType = system.GetComponentTypeHandle<BuiltinMaterialPropertyUnity_SHC>(),
             };
 
-            Dependency = job.ScheduleParallel(m_Query, Dependency);
-            m_ScheduledJobs.Add(Dependency, lightProbesQuery);
+            system.Dependency = job.ScheduleParallel(query, system.Dependency);
 
-            if (m_UpdateAll)
+            if (updateAll)
             {
-                m_Query.SetChangedVersionFilter(ComponentType.ReadOnly<LocalToWorld>());
-                m_UpdateAll = false;
+                query.SetChangedVersionFilter(queryFilter);
             }
+            Profiler.EndSample();
         }
 
-        List<JobHandle> m_ToRemoveList = new List<JobHandle>(100);
-        private void CleanUpCompletedJobs()
+        private List<Vector3> m_Positions = new List<Vector3>(512);
+        private List<SphericalHarmonicsL2> m_LightProbes = new List<SphericalHarmonicsL2>(512);
+        private List<Vector4> m_OcclusionProbes = new List<Vector4>(512);
+        private void UpdateEntitiesFromGrid()
         {
-            m_ToRemoveList.Clear();
-            foreach (var query in m_ScheduledJobs)
+            Profiler.BeginSample("UpdateEntitiesFromGrid");
+
+            var SHArType = GetComponentTypeHandle<BuiltinMaterialPropertyUnity_SHAr>();
+            var SHAgType = GetComponentTypeHandle<BuiltinMaterialPropertyUnity_SHAg>();
+            var SHAbType = GetComponentTypeHandle<BuiltinMaterialPropertyUnity_SHAb>();
+            var SHBrType = GetComponentTypeHandle<BuiltinMaterialPropertyUnity_SHBr>();
+            var SHBgType = GetComponentTypeHandle<BuiltinMaterialPropertyUnity_SHBg>();
+            var SHBbType = GetComponentTypeHandle<BuiltinMaterialPropertyUnity_SHBb>();
+            var SHCType = GetComponentTypeHandle<BuiltinMaterialPropertyUnity_SHC>();
+            var localToWorldType = GetComponentTypeHandle<LocalToWorld>();
+
+            var chunks  = m_ProbeGridQuery.CreateArchetypeChunkArray(Allocator.Temp);
+            if (chunks.Length == 0)
             {
-                if (query.Key.IsCompleted)
-                {
-                    query.Value.Dispose();
-                    m_ToRemoveList.Add(query.Key);
-                }
+                Profiler.EndSample();
+                return;
             }
 
-            foreach (var key in m_ToRemoveList)
-                m_ScheduledJobs.Remove(key);
+            //TODO: Bring this off the main thread when we have new c++ API
+            Dependency.Complete();
 
-            m_ToRemoveList.Clear();
+            foreach (var chunk in chunks)
+            {
+                var chunkSHAr = chunk.GetNativeArray(SHArType);
+                var chunkSHAg = chunk.GetNativeArray(SHAgType);
+                var chunkSHAb = chunk.GetNativeArray(SHAbType);
+                var chunkSHBr = chunk.GetNativeArray(SHBrType);
+                var chunkSHBg = chunk.GetNativeArray(SHBgType);
+                var chunkSHBb = chunk.GetNativeArray(SHBbType);
+                var chunkSHC = chunk.GetNativeArray(SHCType);
+                var chunkLocalToWorld = chunk.GetNativeArray(localToWorldType);
+
+                m_Positions.Clear();
+                m_LightProbes.Clear();
+                m_OcclusionProbes.Clear();
+
+                for (int i = 0; i != chunkLocalToWorld.Length; i++)
+                    m_Positions.Add(chunkLocalToWorld[i].Position);
+
+                LightProbes.CalculateInterpolatedLightAndOcclusionProbes(m_Positions, m_LightProbes, m_OcclusionProbes);
+
+                for (int i = 0; i < m_Positions.Count; ++i)
+                {
+                    var properties = new SHProperties(m_LightProbes[i]);
+                    chunkSHAr[i] = new BuiltinMaterialPropertyUnity_SHAr {Value = properties.SHAr};
+                    chunkSHAg[i] = new BuiltinMaterialPropertyUnity_SHAg {Value = properties.SHAg};
+                    chunkSHAb[i] = new BuiltinMaterialPropertyUnity_SHAb {Value = properties.SHAb};
+                    chunkSHBr[i] = new BuiltinMaterialPropertyUnity_SHBr {Value = properties.SHBr};
+                    chunkSHBg[i] = new BuiltinMaterialPropertyUnity_SHBg {Value = properties.SHBg};
+                    chunkSHBb[i] = new BuiltinMaterialPropertyUnity_SHBb {Value = properties.SHBb};
+                    chunkSHC[i] = new BuiltinMaterialPropertyUnity_SHC {Value = properties.SHC};
+                }
+            }
+            Profiler.EndSample();
         }
 
         [BurstCompile]
         struct UpdateSHValuesJob : IJobChunk
         {
-            //public SHProperties Properties;
-            [Collections.ReadOnly]
-            public LightProbesQuery lightProbesQuery;
+            public SHProperties Properties;
             public ComponentTypeHandle<BuiltinMaterialPropertyUnity_SHAr> SHArType;
             public ComponentTypeHandle<BuiltinMaterialPropertyUnity_SHAg> SHAgType;
             public ComponentTypeHandle<BuiltinMaterialPropertyUnity_SHAb> SHAbType;
@@ -118,7 +183,6 @@ namespace Unity.Rendering
             public ComponentTypeHandle<BuiltinMaterialPropertyUnity_SHBg> SHBgType;
             public ComponentTypeHandle<BuiltinMaterialPropertyUnity_SHBb> SHBbType;
             public ComponentTypeHandle<BuiltinMaterialPropertyUnity_SHC> SHCType;
-            public ComponentTypeHandle<LocalToWorld> LocalToWorldType;
 
             public void Execute(ArchetypeChunk chunk, int chunkIndex, int firstEntityIndex)
             {
@@ -129,33 +193,19 @@ namespace Unity.Rendering
                 var chunkSHBg = chunk.GetNativeArray(SHBgType);
                 var chunkSHBb = chunk.GetNativeArray(SHBbType);
                 var chunkSHC = chunk.GetNativeArray(SHCType);
-                var chunkLocalToWorld = chunk.GetNativeArray(LocalToWorldType);
-
-                var tetrahedronIndexGuesses = new NativeArray<int>(chunkSHAr.Length, Allocator.Temp);
-                for (var i = 0; i < chunkSHAr.Length; i++)
-                    tetrahedronIndexGuesses[i] = -1;
 
                 for (var i = 0; i < chunkSHAr.Length; i++)
                 {
-                    var position = chunkLocalToWorld[i].Position;
-                    int tetrahedronIndex = tetrahedronIndexGuesses[i];
-                    int prevTetrahedronIndex = tetrahedronIndex;
-                    lightProbesQuery.CalculateInterpolatedLightAndOcclusionProbe(position, tetrahedronIndex, out var lightProbe, out var occlusionProbe);
-                    if (tetrahedronIndex != prevTetrahedronIndex)
-                        tetrahedronIndexGuesses[i] = tetrahedronIndex;
-
-                    var properties = new SHProperties(lightProbe);
-                    chunkSHAr[i] = new BuiltinMaterialPropertyUnity_SHAr {Value = properties.SHAr};
-                    chunkSHAg[i] = new BuiltinMaterialPropertyUnity_SHAg {Value = properties.SHAg};
-                    chunkSHAb[i] = new BuiltinMaterialPropertyUnity_SHAb {Value = properties.SHAb};
-                    chunkSHBr[i] = new BuiltinMaterialPropertyUnity_SHBr {Value = properties.SHBr};
-                    chunkSHBg[i] = new BuiltinMaterialPropertyUnity_SHBg {Value = properties.SHBg};
-                    chunkSHBb[i] = new BuiltinMaterialPropertyUnity_SHBb {Value = properties.SHBb};
-                    chunkSHC[i] = new BuiltinMaterialPropertyUnity_SHC {Value = properties.SHC};
+                    chunkSHAr[i] = new BuiltinMaterialPropertyUnity_SHAr {Value = Properties.SHAr};
+                    chunkSHAg[i] = new BuiltinMaterialPropertyUnity_SHAg {Value = Properties.SHAg};
+                    chunkSHAb[i] = new BuiltinMaterialPropertyUnity_SHAb {Value = Properties.SHAb};
+                    chunkSHBr[i] = new BuiltinMaterialPropertyUnity_SHBr {Value = Properties.SHBr};
+                    chunkSHBg[i] = new BuiltinMaterialPropertyUnity_SHBg {Value = Properties.SHBg};
+                    chunkSHBb[i] = new BuiltinMaterialPropertyUnity_SHBb {Value = Properties.SHBb};
+                    chunkSHC[i] = new BuiltinMaterialPropertyUnity_SHC {Value = Properties.SHC};
                 }
             }
         }
     }
 }
-
 #endif

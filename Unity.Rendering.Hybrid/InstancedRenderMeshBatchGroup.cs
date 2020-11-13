@@ -193,8 +193,10 @@ namespace Unity.Rendering
     {
         [ReadOnly] public LODGroupExtensions.LODParams LODParams;
         [ReadOnly] public NativeArray<byte> ForceLowLOD;
-        [ReadOnly] public ComponentTypeHandle<RootLodRequirement> RootLodRequirements;
-        [ReadOnly] public ComponentTypeHandle<LodRequirement> InstanceLodRequirements;
+        [ReadOnly] public ComponentTypeHandle<RootLODRange> RootLODRanges;
+        [ReadOnly] public ComponentTypeHandle<RootLODWorldReferencePoint> RootLODReferencePoints;
+        [ReadOnly] public ComponentTypeHandle<LODRange> LODRanges;
+        [ReadOnly] public ComponentTypeHandle<LODWorldReferencePoint> LODReferencePoints;
         public ushort CameraMoveDistanceFixed16;
         public float DistanceScale;
         public bool DistanceScaleChanged;
@@ -257,23 +259,26 @@ namespace Unity.Rendering
 #endif
                     var chunk = chunkData.Chunk;
 
-                    var rootLodRequirements = chunk.GetNativeArray(RootLodRequirements);
-                    var instanceLodRequirements = chunk.GetNativeArray(InstanceLodRequirements);
+                    var rootLODRanges = chunk.GetNativeArray(RootLODRanges);
+                    var rootLODReferencePoints = chunk.GetNativeArray(RootLODReferencePoints);
+                    var lodRanges = chunk.GetNativeArray(LODRanges);
+                    var lodReferencePoints = chunk.GetNativeArray(LODReferencePoints);
 
                     float graceDistance = float.MaxValue;
 
-                    for (int i = 0; i != chunkInstanceCount; i++)
+                    for (int i = 0; i < chunkInstanceCount; i++)
                     {
-                        var rootLodRequirement = rootLodRequirements[i];
+                        var rootLODRange = rootLODRanges[i];
+                        var rootLODReferencePoint = rootLODReferencePoints[i];
 
                         var rootLodDistance =
                             math.select(
                                 DistanceScale *
-                                math.length(LODParams.cameraPos - rootLodRequirement.LOD.WorldReferencePosition),
+                                math.length(LODParams.cameraPos - rootLODReferencePoint.Value),
                                 DistanceScale, isOrtho);
 
-                        float rootMinDist = math.select(rootLodRequirement.LOD.MinDist, 0.0f, forceLowLOD == 1);
-                        float rootMaxDist = rootLodRequirement.LOD.MaxDist;
+                        float rootMinDist = math.select(rootLODRange.LOD.MinDist, 0.0f, forceLowLOD == 1);
+                        float rootMaxDist = rootLODRange.LOD.MaxDist;
 
                         graceDistance = math.min(math.abs(rootLodDistance - rootMinDist), graceDistance);
                         graceDistance = math.min(math.abs(rootLodDistance - rootMaxDist), graceDistance);
@@ -282,25 +287,30 @@ namespace Unity.Rendering
 
                         if (rootLodIntersect)
                         {
-                            var instanceLodRequirement = instanceLodRequirements[i];
+                            var lodRange = lodRanges[i];
+                            var lodReferencePoint = lodReferencePoints[i];
+
                             var instanceDistance =
                                 math.select(
                                     DistanceScale *
-                                    math.length(LODParams.cameraPos - instanceLodRequirement.WorldReferencePosition),
-                                    DistanceScale, isOrtho);
+                                    math.length(LODParams.cameraPos -
+                                        lodReferencePoint.Value), DistanceScale,
+                                    isOrtho);
 
-                            var instanceLodIntersect = (instanceDistance < instanceLodRequirement.MaxDist) &&
-                                (instanceDistance >= instanceLodRequirement.MinDist);
+                            var instanceLodIntersect =
+                                (instanceDistance < lodRange.MaxDist) &&
+                                (instanceDistance >= lodRange.MinDist);
 
-                            graceDistance = math.min(math.abs(instanceDistance - instanceLodRequirement.MinDist),
+                            graceDistance = math.min(math.abs(instanceDistance - lodRange.MinDist),
                                 graceDistance);
-                            graceDistance = math.min(math.abs(instanceDistance - instanceLodRequirement.MaxDist),
+                            graceDistance = math.min(math.abs(instanceDistance - lodRange.MaxDist),
                                 graceDistance);
 
                             if (instanceLodIntersect)
                             {
-                                var wordIndex = i >> 6;
-                                var bitIndex = i & 0x3f;
+                                var index = i;
+                                var wordIndex = index >> 6;
+                                var bitIndex = index & 0x3f;
                                 var lodWord = chunkEntityLodEnabled.Enabled[wordIndex];
 
                                 lodWord |= 1UL << bitIndex;
@@ -313,6 +323,7 @@ namespace Unity.Rendering
                     chunkData.ForceLowLODPrevious = forceLowLOD;
                 }
             }
+
 
 
 #if UNITY_EDITOR
@@ -564,7 +575,6 @@ namespace Unity.Rendering
         public const int kFlagHasLodData = 1 << 0;
 
         public const int kFlagInstanceCulling = 1 << 1;
-        // size  // start - end offset
         // size  // start - end offset
         public short ChunkInstanceCount; //  2     0 - 2
         public short BatchOffset; //  2     2 - 4
@@ -890,8 +900,10 @@ namespace Unity.Rendering
                 {
                     ForceLowLOD = m_ForceLowLOD,
                     LODParams = lodParams,
-                    RootLodRequirements = m_ComponentSystem.GetComponentTypeHandle<RootLodRequirement>(true),
-                    InstanceLodRequirements = m_ComponentSystem.GetComponentTypeHandle<LodRequirement>(true),
+                    RootLODRanges = m_ComponentSystem.GetComponentTypeHandle<RootLODRange>(true),
+                    RootLODReferencePoints = m_ComponentSystem.GetComponentTypeHandle<RootLODWorldReferencePoint>(true),
+                    LODRanges = m_ComponentSystem.GetComponentTypeHandle<LODRange>(true),
+                    LODReferencePoints = m_ComponentSystem.GetComponentTypeHandle<LODWorldReferencePoint>(true),
                     CameraMoveDistanceFixed16 =
                         Fixed16CamDistance.FromFloatCeil(cameraMoveDistance * lodParams.distanceScale),
                     DistanceScale = lodParams.distanceScale,
@@ -991,8 +1003,11 @@ namespace Unity.Rendering
 
             var boundsType = m_ComponentSystem.GetComponentTypeHandle<ChunkWorldRenderBounds>(true);
             var localToWorldType = m_ComponentSystem.GetComponentTypeHandle<LocalToWorld>(true);
-            var rootLodRequirements = m_ComponentSystem.GetComponentTypeHandle<RootLodRequirement>(true);
-            var instanceLodRequirements = m_ComponentSystem.GetComponentTypeHandle<LodRequirement>(true);
+            var rootLODRanges = m_ComponentSystem.GetComponentTypeHandle<RootLODRange>(true);
+            var rootLODReferencePoints = m_ComponentSystem.GetComponentTypeHandle<RootLODWorldReferencePoint>(true);
+            var lodRanges = m_ComponentSystem.GetComponentTypeHandle<LODRange>(true);
+            var lodReferencePoints = m_ComponentSystem.GetComponentTypeHandle<LODWorldReferencePoint>(true);
+
             var perInstanceCullingTag = m_ComponentSystem.GetComponentTypeHandle<PerInstanceCullingTag>(true);
 
             var shader = material.shader;
@@ -1090,7 +1105,11 @@ namespace Unity.Rendering
                 var bounds = chunk.GetChunkComponentData(boundsType);
 
                 var localKey = new LocalGroupKey {Value = internalBatchIndex};
-                var hasLodData = chunk.Has(rootLodRequirements) && chunk.Has(instanceLodRequirements);
+                var hasLodData =
+                    chunk.Has(rootLODRanges) &&
+                    chunk.Has(rootLODReferencePoints) &&
+                    chunk.Has(lodRanges) &&
+                    chunk.Has(lodReferencePoints);
                 var hasPerInstanceCulling = !hasLodData || chunk.Has(perInstanceCullingTag);
 
 #if !DISABLE_HYBRID_V1_TIGHT_BOUNDS

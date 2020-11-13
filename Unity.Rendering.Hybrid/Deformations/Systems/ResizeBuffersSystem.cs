@@ -8,7 +8,7 @@ namespace Unity.Rendering
     public abstract partial class PushMeshDataSystemBase : SystemBase
     {
         [DisableAutoCreation]
-        internal class ResizeBuffersSystem : SystemBase
+        internal partial class ResizeBuffersSystem : SystemBase
         {
             static readonly ProfilerMarker k_ChangesMarker = new ProfilerMarker("Detect Entity Changes");
             static readonly ProfilerMarker k_ResizeMarker = new ProfilerMarker("Resize Shared Mesh Buffer");

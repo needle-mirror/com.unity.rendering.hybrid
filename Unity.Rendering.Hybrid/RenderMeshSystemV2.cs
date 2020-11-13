@@ -85,8 +85,10 @@ namespace Unity.Rendering
             // This component group must include all types that are being used by the culling job
             m_CullingJobDependencyGroup = GetEntityQuery(
                 ComponentType.ChunkComponentReadOnly<ChunkWorldRenderBounds>(),
-                ComponentType.ReadOnly<RootLodRequirement>(),
-                ComponentType.ReadOnly<LodRequirement>(),
+                ComponentType.ReadOnly<RootLODRange>(),
+                ComponentType.ReadOnly<RootLODWorldReferencePoint>(),
+                ComponentType.ReadOnly<LODRange>(),
+                ComponentType.ReadOnly<LODWorldReferencePoint>(),
                 ComponentType.ReadOnly<WorldRenderBounds>()
             );
 

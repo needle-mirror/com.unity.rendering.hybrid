@@ -14,7 +14,7 @@ Hybrid Renderer is not a render pipeline: it is a system that collects the data 
 This package contains two versions of Hybrid Renderer:
 
 * [Hybrid Renderer V1](#v1) is the hybrid rendering technology introduced in the [Megacity](https://unity.com/megacity) project and released in Unity 2019.1. It is no longer in active development.
-* [Hybrid Renderer V2](#v2) is the improved hybrid rendering technology introduced in Unity 2020.1. It provides better performance and an improved feature set. It is in active development.
+* [Hybrid Renderer V2](#v2) is a new experimental hybrid rendering technology introduced in Unity 2020.1. It provides better performance and an improved feature set. It is in active development.
 
 ## Compatibility and feature support
 
@@ -38,7 +38,7 @@ This package contains two versions of Hybrid Renderer:
 
 Hybrid Renderer V1 is no longer in active development, and the supported feature set for all render pipelines is limited. Hybrid Renderer V2 is early in development and some features are not yet supported, but we plan to support the full feature set.
 
-**Important:** Hybrid Renderer V2 is considered experimental in Unity 2020.1. We have validated it on Windows DX11, DX12, Vulkan and Mac Metal backends in both Editor and Standalone builds. Mobile device and console platform support will be validated in 2020.2.
+**Important:** Hybrid Renderer V2 is considered experimental in Unity 2020.1. It is not yet production ready and should only be used for evaluation and prototyping purposes. We have tested it on Windows DX11, DX12, Vulkan and Mac Metal backends in both Editor and Standalone builds. Mobile device and console platform support is planned for 2020.2 release. In order to get the latest Hybrid Renderer V2 fixes and features, upgrading to the latest Unity version will be required.
 
 #### URP features
 
@@ -52,15 +52,18 @@ Unlit shader | No | Yes
 RenderLayer | No | Yes
 TransformParams | No | Yes
 DisableRendering | No | Yes
-Point + spot lights | No | Planned for 2020
-Ambient probe | No | Planned for 2020
-Light probes | No | Planned for 2020
-Reflection probes | No | Planned for 2020
-Lightmaps | No | Planned for 2020
+Sun light | Yes | Yes
+Point + spot lights | No | Planned for 2021
+Ambient probe | No | Yes
+Light probes | No | Yes
+Reflection probes | No | Planned for 2021
+Lightmaps | No | Yes
 Shader keywords | No | Planned for 2021
 LOD crossfade | No | Planned for 2021
 Viewport shader override | No | Planned for 2021
-Transparencies (sorted) | No | Planned for 2021
+Transparencies (sorted) | No | Yes
+Occlusion culling (dynamic) | No | Experimental
+Skinning / mesh deform | No | Experimental
 
 #### HDRP features
 
@@ -71,21 +74,25 @@ Built-in property overrides | No | Yes
 ShaderGraph | Yes | Yes
 Lit shader | No | Yes
 Unlit shader | No | Yes
-Decal shader | No | Planned for 2020
+Decal shader | No | Yes
+LayeredLit shader | No | Yes
 RenderLayer | No | Yes
 TransformParams | No | Yes
 DisableRendering | No | Yes
 Motion blur | No | Yes
 Temporal AA | No | Yes
+Sun light | Yes | Yes
 Point + spot lights | Yes | Yes
 Ambient probe | Yes | Yes
 Light probes | Yes | Yes
 Reflection probes | Yes | Yes
-Lightmaps | No | Planned for 2020
+Lightmaps | No | Yes
 Shader keywords | No | Planned for 2021
 LOD crossfade | No | Planned for 2021
 Viewport shader override | No | Planned for 2021
-Transparencies (sorted) | No | Planned for 2021
+Transparencies (sorted) | No | Yes
+Occlusion culling (dynamic) | No | Experimental
+Skinning / mesh deform | No | Experimental
 
 ## Hybrid Renderer overview
 
@@ -130,7 +137,7 @@ Hybrid Renderer V1 only supports ShaderGraph based shaders. Built-in shaders suc
 * Unity 2019.2 only: Enable **GPU Instanced** checkbox in any ShaderGraph custom property:
 ![](images/GPUInstancingProperty.png)
 
-* Unity 2019.3+ only: Enable **Hybrid Instanced (experimental)** checkbox in any ShaderGraph custom property:
+* Unity 2019.3+ only: Enable **Hybrid Instanced (experimental)** for any Shader Graph custom property. This property is in the **Node Settings** tab of the **Graph Inspector**:
 ![](images/HybridInstancingProperty.png)
 
 Unless every shader and material you use with Hybrid Renderer V1 is setup correctly, you might encounter visual issues. Unfortunately, there's no validation or error messages in Hybrid Renderer V1. The most common visual issues caused by incorrect Shader and Material setup are:
@@ -196,7 +203,7 @@ If you want to override a built-in HDRP or URP property not listed here, you can
 
 You can create your own custom ShaderGraph properties, and expose them to DOTS as IComponentData. This allows you to write C#/Burst code to setup and animate your own shader inputs.
 
-Enable **Hybrid Instanced (experimental)** checkbox in your ShaderGraph custom property:
+Select your Shader Graph custom property and view it in the **Graph Inspector**. Open the **Node Settings** tab and enable **Hybrid Instanced (experimental)** :
 ![](images/HybridInstancingProperty.png)
 
 Then write a DOTS IComponentData struct:
@@ -235,9 +242,9 @@ class AnimateMyOwnColorSystem : SystemBase
 
 ### Hybrid entities
 
-Hybrid entities allow you to attach MonoBehaviour components to DOTS entities, without converting them to IComponentData. A conversion system calls **AddHybridComponent** to attach a managed component to DOTS entity.
+Hybrid entities is a new DOTS feature. This feature allows you to attach MonoBehaviour components to DOTS entities, without converting them to IComponentData. A conversion system calls **AddHybridComponent** to attach a managed component to DOTS entity.
 
-**The following hybrid components are supported by Hybrid Renderer:**
+**The following graphics related hybrid components are supported by Hybrid Renderer:**
 * Light + HDAdditionalLightData (HDRP)
 * Light + UniversalAdditionalLightData (URP)
 * ReflectionProbe + HDAdditionalReflectionData (HDRP)
@@ -277,7 +284,7 @@ class AnimateHDRPIntensitySystem : SystemBase
 
 [BatchRendererGroup](https://docs.unity3d.com/ScriptReference/Rendering.BatchRendererGroup.html) is the Unity Engine API that the Hybrid Renderer uses. If you are using the Hybrid Renderer, you don't need to interact with this API directly; however, if you are an advanced rendering engineer and you want to build your own renderer on top of this API, this section will give you some advice. 
 
-**Important:** This API changes frequently. We are adding support for all the remaining URP and HDRP features, and making the data model more efficient to provide AAA class performance. We do not guarantee that the current API will remain stable, and we have a long term plan to rewrite it completely to make it more flexible, efficient, and straightforward to use.
+**Important:** This API is experimental and changes frequently. We are adding support for all the remaining URP and HDRP features, and making the data model more efficient to provide AAA class performance. We do not guarantee that the current API will remain stable, and we have a long term plan to rewrite it completely to make it more flexible, efficient, and straightforward to use.
 
 The BatchRendererGroup class actually presents two different versions of the API: one for Hybrid Renderer V1, and one for Hybrid Renderer V2. You cannot mix and match V1 and V2 API calls inside a single BatchRendererGroup instance.
 

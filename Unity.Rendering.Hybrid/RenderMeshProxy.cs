@@ -1,8 +1,6 @@
 using System;
 using Unity.Core;
 using Unity.Entities;
-using Unity.Mathematics;
-using Unity.Transforms;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -118,20 +116,6 @@ namespace Unity.Rendering
             }
 
             return hash;
-        }
-    }
-
-    [AddComponentMenu("DOTS/Deprecated/RenderMeshProxy-Deprecated")]
-    [Obsolete("RenderMeshProxy has been deprecated. Please use the new GameObject-to-entity conversion workflows instead. (RemovedAfter 2020-07-03).")]
-    public class RenderMeshProxy : SharedComponentDataProxy<RenderMesh>
-    {
-        internal override void UpdateComponentData(EntityManager manager, Entity entity)
-        {
-            // Hack to make rendering not break if there is no local to world
-            if (!manager.HasComponent<LocalToWorld>(entity))
-                manager.AddComponentData(entity, new LocalToWorld {Value = float4x4.identity});
-
-            base.UpdateComponentData(manager, entity);
         }
     }
 }
