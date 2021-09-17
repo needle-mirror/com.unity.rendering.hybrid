@@ -1,12 +1,12 @@
 {
   "name": "com.unity.rendering.hybrid",
   "displayName": "Hybrid Renderer",
-  "version": "0.50.0-preview.24",
+  "version": "0.50.0-preview.44",
   "unity": "2020.3",
   "unityRelease": "0f1",
   "description": "The Hybrid Rendering package provides systems and components for drawing meshes using DOTS, including support for instanced mesh rendering and LOD.",
   "dependencies": {
-    "com.unity.entities": "0.50.0-preview.24"
+    "com.unity.entities": "0.50.1-preview.2"
   },
   "keywords": [
     "dots",
@@ -14,12 +14,15 @@
     "rendering",
     "unity"
   ],
+  "upm": {
+    "changelog": "### Added\n\n* Hybrid Renderer is automatically disabled when required support is not present or -nographics is given on the command line.\n* Hybrid assemblies will not be included in DOTS Runtime builds.\n\n### Removed\n\n* Hybrid Renderer V1 is now removed. V2 is the default renderer\n\n### Fixed\n\n* Fixed memory leak on frames where no data uploading happened.\n* `HybridRendererSystem` was not correctly tracking all its component read/write dependencies.\n* Warning about erroneous materials did not have enough information to act on them.\n* Updated code comments to not refer to a deleted method."
+  },
   "upmCi": {
-    "footprint": "a4de221ef69112c4df253d920e266783131c152f"
+    "footprint": "402d71ffd86bac6252a45d1a5291d0e86d52fa98"
   },
   "repository": {
     "url": "https://github.cds.internal.unity3d.com/unity/dots.git",
     "type": "git",
-    "revision": "8327688fcdee91448c8d4aa1ebbd5a4c1e665bef"
+    "revision": "f510d2cf044b48696ac6e43c591f2fb031f46fca"
   }
 }

@@ -5,6 +5,7 @@
 ### Added
 
 * Hybrid Renderer is automatically disabled when required support is not present or -nographics is given on the command line.
+* Hybrid assemblies will not be included in DOTS Runtime builds.
 
 ### Removed
 
@@ -15,6 +16,9 @@
 * Fixed memory leak on frames where no data uploading happened.
 * `HybridRendererSystem` was not correctly tracking all its component read/write dependencies.
 * Warning about erroneous materials did not have enough information to act on them.
+* Updated code comments to not refer to a deleted method.
+
+
 
 ## [0.13.0] - 2021-03-15
 
