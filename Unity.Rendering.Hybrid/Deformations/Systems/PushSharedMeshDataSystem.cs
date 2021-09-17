@@ -8,7 +8,7 @@ namespace Unity.Rendering
     public abstract partial class PushMeshDataSystemBase : SystemBase
     {
         [DisableAutoCreation]
-        internal class PushSharedMeshDataSystem : SystemBase
+        internal partial class PushSharedMeshDataSystem : SystemBase
         {
             static readonly ProfilerMarker k_LayoutSharedMeshData = new ProfilerMarker("Layout Shared Mesh Data");
             static readonly ProfilerMarker k_CollectSharedMeshData = new ProfilerMarker("Collect Shared Mesh Data");

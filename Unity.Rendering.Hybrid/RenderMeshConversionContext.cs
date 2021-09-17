@@ -266,6 +266,13 @@ namespace Unity.Rendering
 
     class RenderMeshConversionContext
     {
+        enum StaticLightingMode
+        {
+            None = 0,
+            LightMapped = 1,
+            LightProbes = 2,
+        }
+
         /// <summary>
         /// If true, a <see cref="Renderer"/> with only a single material will be converted into
         /// a single entity using <see cref="ConvertToSingleEntity"/>.
@@ -368,6 +375,13 @@ namespace Unity.Rendering
                 FlipWinding = flipWinding,
             };
 
+            // Always disable per-object motion vectors for static objects
+            if (IsStaticObject(renderer))
+            {
+                if (desc.MotionMode == MotionVectorGenerationMode.Object)
+                    desc.MotionMode = MotionVectorGenerationMode.Camera;
+            }
+
             if (AttachToPrimaryEntityForSingleMaterial && sharedMaterials.Count == 1)
             {
                 ConvertToSingleEntity(
@@ -388,20 +402,27 @@ namespace Unity.Rendering
             }
         }
 
-        private static ComponentTypes kLightProbeComponents = new ComponentTypes(
-            ComponentType.ReadWrite<AmbientProbeTag>(),
-            ComponentType.ReadWrite<BlendProbeTag>(),
-            ComponentType.ReadWrite<CustomProbeTag>()
-        );
+        private bool IsStaticObject(Renderer renderer)
+        {
+            var go = renderer.gameObject;
 
-        private Material ConfigureHybridLightMapping(
+            if (go.isStatic)
+                return true;
+
+            var e = m_ConversionSystem.GetPrimaryEntity(go);
+            return m_DstEntityManager.HasComponent<Static>(e);
+        }
+
+        private Material ConfigureHybridStaticLighting(
             Entity entity,
             EntityManager entityManager,
             Renderer renderer,
             Material material)
         {
 #if USE_HYBRID_LIGHT_MAPS
-            var staticLightingMode = RenderMeshUtility.StaticLightingModeFromRenderer(renderer);
+            var staticLightingMode = StaticLightingModeFromRenderer(renderer);
+            var lightProbeUsage = renderer.lightProbeUsage;
+
             if (staticLightingMode == StaticLightingMode.LightMapped)
             {
                 var lightMapRef = m_LightMapConversionContext.GetLightMapReference(renderer);
@@ -421,20 +442,18 @@ namespace Unity.Rendering
                     return lightMappedMaterial;
                 }
             }
+            else if (staticLightingMode == StaticLightingMode.LightProbes)
+            {
+                if (lightProbeUsage == LightProbeUsage.CustomProvided)
+                    entityManager.AddComponent<CustomProbeTag>(entity);
+                else if (lightProbeUsage == LightProbeUsage.BlendProbes)
+                    entityManager.AddComponent<BlendProbeTag>(entity);
+                else
+                    entityManager.AddComponent<AmbientProbeTag>(entity);
+            }
 #endif
 
             return null;
-        }
-
-        private void RemoveLightProbeComponentsFromLightMappedEntities(
-            Entity entity,
-            EntityManager entityManager)
-        {
-#if USE_HYBRID_LIGHT_MAPS
-            if (entityManager.HasComponent<LightMaps>(entity))
-                // If the entity is light mapped, remove all light probe components it may have.
-                entityManager.RemoveComponent(entity, kLightProbeComponents);
-#endif
         }
 
         /// <summary>
@@ -449,7 +468,7 @@ namespace Unity.Rendering
         {
             var entity = conversionSystem.GetPrimaryEntity(renderer);
 
-            var lightmappedMaterial = ConfigureHybridLightMapping(
+            var lightmappedMaterial = ConfigureHybridStaticLighting(
                 entity,
                 dstEntityManager,
                 renderer,
@@ -462,8 +481,6 @@ namespace Unity.Rendering
                 entity,
                 dstEntityManager,
                 renderMeshDescription);
-
-            RemoveLightProbeComponentsFromLightMappedEntities(entity, dstEntityManager);
 
             conversionSystem.ConfigureEditorRenderData(entity, renderer.gameObject, true);
         }
@@ -503,7 +520,7 @@ namespace Unity.Rendering
 
                 var material = sharedMaterials[m];
 
-                var lightmappedMaterial = ConfigureHybridLightMapping(
+                var lightmappedMaterial = ConfigureHybridStaticLighting(
                     meshEntity,
                     dstEntityManager,
                     renderer,
@@ -520,10 +537,22 @@ namespace Unity.Rendering
                     dstEntityManager,
                     renderMeshDescription);
 
-                RemoveLightProbeComponentsFromLightMappedEntities(meshEntity, dstEntityManager);
-
                 conversionSystem.ConfigureEditorRenderData(meshEntity, renderer.gameObject, true);
             }
+        }
+
+        /// <summary>
+        /// Return the <see cref="StaticLightingMode"/> that corresponds to the lighting settings of <see cref="renderer"/>.
+        /// </summary>
+        private static StaticLightingMode StaticLightingModeFromRenderer(Renderer renderer)
+        {
+            var staticLightingMode = StaticLightingMode.None;
+            if (renderer.lightmapIndex >= 65534 || renderer.lightmapIndex < 0)
+                staticLightingMode = StaticLightingMode.LightProbes;
+            else if (renderer.lightmapIndex >= 0)
+                staticLightingMode = StaticLightingMode.LightMapped;
+
+            return staticLightingMode;
         }
     }
 }

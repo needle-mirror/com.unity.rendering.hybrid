@@ -48,7 +48,8 @@ namespace Unity.Rendering
             if (data == null)
                 return null;
 
-            var result = new Texture2DArray(data.width, data.height, source.Count, source[0].graphicsFormat, TextureCreationFlags.MipChain);
+            bool isSRGB = GraphicsFormatUtility.IsSRGBFormat(data.graphicsFormat);
+            var result = new Texture2DArray(data.width, data.height, source.Count, source[0].format, true, !isSRGB);
             result.filterMode = FilterMode.Trilinear;
             result.wrapMode = TextureWrapMode.Clamp;
             result.anisoLevel = 3;

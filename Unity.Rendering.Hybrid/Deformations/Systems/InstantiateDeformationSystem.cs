@@ -5,7 +5,7 @@ using UnityEngine;
 namespace Unity.Rendering
 {
 #if ENABLE_COMPUTE_DEFORMATIONS
-    public abstract class InstantiateDeformationSystemBase : SystemBase
+    public abstract partial class InstantiateDeformationSystemBase : SystemBase
     {
         static readonly ProfilerMarker k_InstantiateDeformationMarker = new ProfilerMarker("InstantiateDeformationSystem");
 

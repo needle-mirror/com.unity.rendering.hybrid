@@ -1,5 +1,5 @@
 ## Mesh deformations
-This page describes how to deform meshes using skinning and blendshapes, similar to what the [SkinnedMeshRenderer](https://docs.unity3d.com/Manual/class-SkinnedMeshRenderer.html) does. Generally, you want to use this in combination with DOTS Animation. For samples of setups and usage of the systems, see [DOTS Animation Samples](https://github.com/Unity-Technologies/Unity.Animation/blob/master/UnityAnimationHDRPExamples/README.md). 
+This page describes how to deform meshes using skinning and blendshapes, similar to what the [SkinnedMeshRenderer](https://docs.unity3d.com/Manual/class-SkinnedMeshRenderer.html) does. Generally, you want to use this in combination with DOTS Animation. For samples of setups and usage of the systems, see [DOTS Animation Samples](https://github.com/Unity-Technologies/Unity.Animation.Samples/blob/master/README.md). 
 
 
 ## Disclaimer
@@ -17,8 +17,7 @@ To use mesh deformations in your Unity Project, you need to correctly set up:
 Follow these steps to set your Unity Project up to support mesh deformation.
 
 1. Make sure your Unity Project uses [Scriptable Render Pipeline](https://docs.unity3d.com/Manual/ScriptableRenderPipeline.html) (SRP) version 7.x or higher.
-2. Make sure your Unity Project uses Hybrid Renderer v2
-3. If you intend to use Compute Deformation (required for blendshapes), go to Project Settings (menu: **Edit > Project Settings**) and, in the Player section, add the `ENABLE_COMPUTE_DEFORMATIONS` define to **Scripting Define Symbols**.
+2. If you intend to use Compute Deformation (required for blendshapes), go to Project Settings (menu: **Edit > Project Settings**) and, in the Player section, add the `ENABLE_COMPUTE_DEFORMATIONS` define to **Scripting Define Symbols**.
 
 ### Material setup
 
@@ -49,8 +48,7 @@ Skins the mesh on the GPU in the vertex shader.
 - Unity 2019.3b11 or newer (recommended)
 - Hybrid Renderer 0.4.0 or higher (recommended)
 - SRP version 7.x.x or higher (recommended)
-- HDRP & URP support when used with Hybrid Renderer v2 (recommended)
-- Only supports HDRP when used with Hybrid Renderer v1
+- HDRP & URP are supported
 
 
 ### Compute shader deformation
@@ -63,8 +61,7 @@ Applies mesh deformations on the GPU using compute shaders.
 - Unity 2020.1.0b6 or higher (recommended)
 - Hybrid Renderer 0.5.0 or higher (recommended)
 - SRP version 9.x.x or higher (recommended)
-- With Hybrid Renderer v2 HDRP & URP is supported
-- With Hybrid Renderer v1 only HDRP is supported
+- HDRP & URP are supported
 
 ## Known limitations
 - Wire frame mode and other debug modes do not display mesh deformations.

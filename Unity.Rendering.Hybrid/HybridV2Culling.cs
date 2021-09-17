@@ -68,7 +68,7 @@ namespace Unity.Rendering
     unsafe struct SelectLodEnabled : IJobChunk
     {
         [ReadOnly] public LODGroupExtensions.LODParams LODParams;
-        [ReadOnly] public NativeArray<byte> ForceLowLOD;
+        [ReadOnly] public NativeList<byte> ForceLowLOD;
         [ReadOnly] public ComponentTypeHandle<RootLODRange> RootLODRanges;
         [ReadOnly] public ComponentTypeHandle<RootLODWorldReferencePoint> RootLODReferencePoints;
         [ReadOnly] public ComponentTypeHandle<LODRange> LODRanges;
@@ -247,7 +247,7 @@ namespace Unity.Rendering
     unsafe struct SimpleCullingJob : IJobChunk
     {
         [DeallocateOnJobCompletion][ReadOnly] public NativeArray<FrustumPlanes.PlanePacket4> Planes;
-        [ReadOnly] public NativeArray<int> InternalToExternalRemappingTable;
+        [ReadOnly] public NativeList<int> InternalToExternalRemappingTable;
 
         [ReadOnly] public ComponentTypeHandle<WorldRenderBounds> BoundsComponent;
         public ComponentTypeHandle<HybridChunkInfo> HybridChunkInfo;

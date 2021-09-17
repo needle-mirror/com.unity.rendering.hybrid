@@ -9,12 +9,12 @@ using Debug = UnityEngine.Debug;
 
 namespace Unity.Rendering
 {
-    public abstract partial class PrepareSkinMatrixSystemBase : JobComponentSystem
+    public abstract partial class PrepareSkinMatrixSystemBase : SystemBase
     {
         static readonly ProfilerMarker k_Marker = new ProfilerMarker("PrepareSkinMatrixSystemBase");
 
         EntityQuery m_Query;
-        EntityQuery m_SkinningTagQuery; 
+        EntityQuery m_SkinningTagQuery;
 
         NativeArray<float3x4> m_AllSkinMatrices;
         PushMeshDataSystemBase m_PushMeshDataSystem;
@@ -47,7 +47,7 @@ namespace Unity.Rendering
                 m_AllSkinMatrices.Dispose();
         }
 
-        protected override JobHandle OnUpdate(JobHandle dependency)
+        protected override void OnUpdate()
         {
             k_Marker.Begin();
 
@@ -69,10 +69,10 @@ namespace Unity.Rendering
                         deformedEntityToComputeIndexParallel.Add(deformedEntity.Value, index.Value);
                     }).Schedule(new JobHandle());
 
-            dependency = JobHandle.CombineDependencies(dependency, hashMapDeps);
+            Dependency = JobHandle.CombineDependencies(Dependency, hashMapDeps);
 
             var skinMatricesBuffer = m_AllSkinMatrices;
-            dependency = Entities
+            Dependency = Entities
                 .WithName("FlattenSkinMatrices")
                 .WithNativeDisableContainerSafetyRestriction(skinMatricesBuffer)
                 .WithReadOnly(deformedEntityToComputeIndex)
@@ -95,12 +95,11 @@ namespace Unity.Rendering
                             );
                         }
                     }
-                }).Schedule(dependency);
+                }).Schedule(Dependency);
 
-            dependency = deformedEntityToComputeIndex.Dispose(dependency);
+            Dependency = deformedEntityToComputeIndex.Dispose(Dependency);
 
             k_Marker.End();
-            return dependency;
         }
 
         internal void AssignGlobalBufferToShader()
@@ -111,7 +110,7 @@ namespace Unity.Rendering
         }
     }
 
-    public abstract class FinalizePushSkinMatrixSystemBase : SystemBase
+    public abstract partial class FinalizePushSkinMatrixSystemBase : SystemBase
     {
         EntityQuery m_Query;
 

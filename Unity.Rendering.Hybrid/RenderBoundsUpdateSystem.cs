@@ -125,7 +125,7 @@ namespace Unity.Rendering
     [UpdateInGroup(typeof(UpdatePresentationSystemGroup))]
     [WorldSystemFilter(WorldSystemFilterFlags.Default | WorldSystemFilterFlags.EntitySceneOptimizations)]
     [ExecuteAlways]
-    class RenderBoundsUpdateSystem : JobComponentSystem
+    partial class RenderBoundsUpdateSystem : SystemBase
     {
         EntityQuery m_WorldRenderBounds;
 
@@ -168,8 +168,11 @@ namespace Unity.Rendering
             m_WorldRenderBounds.AddOrderVersionFilter();
         }
 
-        protected override JobHandle OnUpdate(JobHandle dependency)
+        protected override void OnUpdate()
         {
+            if (!HybridRendererSystem.HybridRendererEnabled)
+                return;
+
             var boundsJob = new BoundsJob
             {
                 RendererBounds = GetComponentTypeHandle<RenderBounds>(true),
@@ -177,7 +180,7 @@ namespace Unity.Rendering
                 WorldRenderBounds = GetComponentTypeHandle<WorldRenderBounds>(),
                 ChunkWorldRenderBounds = GetComponentTypeHandle<ChunkWorldRenderBounds>(),
             };
-            return boundsJob.ScheduleParallel(m_WorldRenderBounds, dependency);
+            Dependency = boundsJob.ScheduleParallel(m_WorldRenderBounds, Dependency);
         }
 
 #if false

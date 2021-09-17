@@ -9,7 +9,7 @@ using Debug = UnityEngine.Debug;
 namespace Unity.Rendering
 {
 #if ENABLE_COMPUTE_DEFORMATIONS
-    public abstract class PrepareBlendWeightSystemBase : JobComponentSystem
+    public abstract partial class PrepareBlendWeightSystemBase : SystemBase
     {
         static readonly ProfilerMarker k_Marker = new ProfilerMarker("PrepareBlendWeightSystemBase");
 
@@ -45,7 +45,7 @@ namespace Unity.Rendering
                 m_AllBlendWeights.Dispose();
         }
 
-        protected override JobHandle OnUpdate(JobHandle dependency)
+        protected override void OnUpdate()
         {
             k_Marker.Begin();
 
@@ -66,10 +66,10 @@ namespace Unity.Rendering
                         deformedEntityToComputeIndexParallel.Add(deformedEntity.Value, index.Value);
                     }).Schedule(new JobHandle());
 
-            dependency = JobHandle.CombineDependencies(dependency, hashMapDeps);
+            Dependency = JobHandle.CombineDependencies(Dependency, hashMapDeps);
 
             var blendShapeWeightsBuffer = m_AllBlendWeights;
-            dependency = Entities
+            Dependency = Entities
                 .WithName("FlattenBlendShapeWeights")
                 .WithNativeDisableContainerSafetyRestriction(blendShapeWeightsBuffer)
                 .WithReadOnly(deformedEntityToComputeIndex)
@@ -92,12 +92,11 @@ namespace Unity.Rendering
                             );
                         }
                     }
-                }).Schedule(dependency);
+                }).Schedule(Dependency);
 
-            dependency = deformedEntityToComputeIndex.Dispose(dependency);
+            Dependency = deformedEntityToComputeIndex.Dispose(Dependency);
 
             k_Marker.End();
-            return dependency;
         }
 
         internal void AssignGlobalBufferToShader()
@@ -108,7 +107,7 @@ namespace Unity.Rendering
         }
     }
 
-    public abstract class FinalizePushBlendWeightSystemBase : SystemBase
+    public abstract partial class FinalizePushBlendWeightSystemBase : SystemBase
     {
         EntityQuery m_Query;
 

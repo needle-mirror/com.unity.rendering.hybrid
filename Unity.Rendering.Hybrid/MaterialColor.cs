@@ -32,8 +32,7 @@ namespace Unity.Rendering
                 Entities.ForEach((MaterialColor uMaterialColor) =>
                 {
                     var entity = GetPrimaryEntity(uMaterialColor);
-                    Color linearCol = uMaterialColor.color.linear;
-                    var data = new Unity.Rendering.MaterialColor { Value = new float4(linearCol.r, linearCol.g, linearCol.b, linearCol.a) };
+                    var data = new Unity.Rendering.MaterialColor { Value = new float4(uMaterialColor.color.r, uMaterialColor.color.g, uMaterialColor.color.b, uMaterialColor.color.a) };
                     DstEntityManager.AddComponentData(entity, data);
                 });
             }

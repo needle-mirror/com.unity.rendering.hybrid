@@ -5,7 +5,7 @@ using UnityEngine;
 namespace Unity.Rendering
 {
 #if ENABLE_COMPUTE_DEFORMATIONS
-    public abstract class BlendShapeDeformationSystemBase : SystemBase
+    public abstract partial class BlendShapeDeformationSystemBase : SystemBase
     {
         static readonly ProfilerMarker k_BlendShapeDeformationMarker = new ProfilerMarker("BlendShapeDeformationDispatch");
 

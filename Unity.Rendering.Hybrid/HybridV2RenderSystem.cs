@@ -1,4 +1,5 @@
-#define DEBUG_LOG_HYBRID_V2
+// #define DISABLE_HYBRID_V2_SRP_LOGS
+// #define DEBUG_LOG_HYBRID_V2
 // #define DEBUG_LOG_CHUNK_CHANGES
 // #define DEBUG_LOG_TOP_LEVEL
 // #define DEBUG_LOG_BATCHES
@@ -11,6 +12,7 @@
 // #define DEBUG_LOG_VISIBLE_INSTANCES
 // #define DEBUG_LOG_MATERIAL_PROPERTIES
 // #define DEBUG_LOG_MEMORY_USAGE
+// #define DEBUG_LOG_AMBIENT_PROBE
 // #define PROFILE_BURST_JOB_INTERNALS
 
 #if UNITY_EDITOR || DEBUG_LOG_OVERRIDES
@@ -25,16 +27,17 @@
 // #define DISABLE_HYBRID_ERROR_MATERIAL
 
 // Assert that V2 requirements are met if it's enabled
-#if ENABLE_HYBRID_RENDERER_V2
 #if !UNITY_2020_1_OR_NEWER
 #error Hybrid Renderer V2 requires Unity 2020.1 or newer.
 #endif
-#if !(HDRP_9_0_0_OR_NEWER || URP_9_0_0_OR_NEWER)
-#error Hybrid Renderer V2 requires either HDRP 9.0.0 or URP 9.0.0 or newer.
-#endif
+
+// Hybrid Renderer is disabled if SRP 9 is not found, unless an override define is present
+// It is also disabled if -nographics is given from the command line.
+#if !(HDRP_9_0_0_OR_NEWER || URP_9_0_0_OR_NEWER || HYBRID_RENDERER_ENABLE_WITHOUT_SRP)
+#define HYBRID_RENDERER_DISABLED
 #endif
 
-#if ENABLE_UNITY_OCCLUSION && ENABLE_HYBRID_RENDERER_V2 && UNITY_2020_2_OR_NEWER && (HDRP_9_0_0_OR_NEWER || URP_9_0_0_OR_NEWER)
+#if ENABLE_UNITY_OCCLUSION && UNITY_2020_2_OR_NEWER && (HDRP_9_0_0_OR_NEWER || URP_9_0_0_OR_NEWER)
 #define USE_UNITY_OCCLUSION
 #endif
 
@@ -47,6 +50,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Unity.Burst;
 using Unity.Collections;
@@ -347,26 +351,21 @@ namespace Unity.Rendering
         public NativeArray<long> BatchHadMovingEntities;
 
         [NativeDisableParallelForRestriction]
-        public NativeArray<ArchetypeChunk> NewChunks;
-        [NativeDisableParallelForRestriction]
-        public NativeArray<int> NumNewChunks;
-
-        [NativeDisableParallelForRestriction]
         [ReadOnly]
         public NativeArray<ChunkProperty> ChunkProperties;
 
         [NativeDisableParallelForRestriction]
         [ReadOnly]
-        public NativeArray<BatchMotionInfo> BatchMotionInfos;
+        public NativeList<BatchMotionInfo> BatchMotionInfos;
 
         [NativeDisableParallelForRestriction]
-        public NativeArray<float> BatchAABBs;
+        public NativeList<float> BatchAABBs;
         public MinMaxAABB ThreadLocalAABB;
 
 #if USE_PICKING_MATRICES
         [NativeDisableParallelForRestriction]
         [ReadOnly]
-        public NativeArray<IntPtr> BatchPickingMatrices;
+        public NativeList<IntPtr> BatchPickingMatrices;
 #endif
 
         [NativeDisableParallelForRestriction]
@@ -418,31 +417,17 @@ namespace Unity.Rendering
                 ~mask);
         }
 
-        public void ProcessChunk(in HybridChunkInfo chunkInfo, ArchetypeChunk chunk, ChunkWorldRenderBounds chunkBounds)
+        public void ProcessChunk(ref HybridChunkInfo chunkInfo, ArchetypeChunk chunk, ChunkWorldRenderBounds chunkBounds)
         {
 #if DEBUG_LOG_CHUNKS
             Debug.Log($"HybridChunkUpdater.ProcessChunk(internalBatchIndex: {chunkInfo.InternalIndex}, valid: {chunkInfo.Valid}, count: {chunk.Count}, chunk: {chunk.GetHashCode()})");
 #endif
 
             if (chunkInfo.Valid)
-                ProcessValidChunk(chunkInfo, chunk, chunkBounds.Value, false);
-            else
-                DeferNewChunk(chunkInfo, chunk);
+                ProcessValidChunk(ref chunkInfo, chunk, chunkBounds.Value, false);
         }
 
-        public unsafe void DeferNewChunk(in HybridChunkInfo chunkInfo, ArchetypeChunk chunk)
-        {
-            if (chunk.Archetype.Prefab || chunk.Archetype.Disabled)
-                return;
-
-            int* numNewChunks = (int*)NumNewChunks.GetUnsafePtr();
-            int iPlus1 = System.Threading.Interlocked.Add(ref numNewChunks[0], 1);
-            int i = iPlus1 - 1; // C# Interlocked semantics are weird
-            Debug.Assert(i < NewChunks.Length, "Out of space in the NewChunks buffer");
-            NewChunks[i] = chunk;
-        }
-
-        public unsafe void ProcessValidChunk(in HybridChunkInfo chunkInfo, ArchetypeChunk chunk,
+        public unsafe void ProcessValidChunk(ref HybridChunkInfo chunkInfo, ArchetypeChunk chunk,
             MinMaxAABB chunkAABB, bool isNewChunk)
         {
             if (!isNewChunk)
@@ -654,15 +639,57 @@ namespace Unity.Rendering
     }
 
     [BurstCompile]
-    internal struct UpdateAllHybridChunksJob : IJobChunk
+    internal struct ClassifyNewChunksJob : IJobChunk
     {
+        [ReadOnly] public ComponentTypeHandle<ChunkHeader> ChunkHeader;
         [ReadOnly] public ComponentTypeHandle<HybridChunkInfo> HybridChunkInfo;
+
+        [NativeDisableParallelForRestriction]
+        public NativeArray<ArchetypeChunk> NewChunks;
+        [NativeDisableParallelForRestriction]
+        public NativeArray<int> NumNewChunks;
+
+        public void Execute(ArchetypeChunk metaChunk, int chunkIndex, int firstEntityIndex)
+        {
+            var chunkHeaders = metaChunk.GetNativeArray(ChunkHeader);
+            var hybridChunkInfos = metaChunk.GetNativeArray(HybridChunkInfo);
+
+            for (int i = 0; i < metaChunk.Count; ++i)
+            {
+                var chunkInfo = hybridChunkInfos[i];
+                var chunkHeader = chunkHeaders[i];
+
+                if (ShouldCountAsNewChunk(chunkInfo, chunkHeader.ArchetypeChunk))
+                {
+                    ClassifyNewChunk(chunkHeader.ArchetypeChunk);
+                }
+            }
+        }
+
+        bool ShouldCountAsNewChunk(in HybridChunkInfo chunkInfo, in ArchetypeChunk chunk)
+        {
+            return !chunkInfo.Valid && !chunk.Archetype.Prefab && !chunk.Archetype.Disabled;
+        }
+
+        public unsafe void ClassifyNewChunk(ArchetypeChunk chunk)
+        {
+            int* numNewChunks = (int*)NumNewChunks.GetUnsafePtr();
+            int iPlus1 = System.Threading.Interlocked.Add(ref numNewChunks[0], 1);
+            int i = iPlus1 - 1; // C# Interlocked semantics are weird
+            Debug.Assert(i < NewChunks.Length, "Out of space in the NewChunks buffer");
+            NewChunks[i] = chunk;
+        }
+    }
+
+    [BurstCompile]
+    internal struct UpdateOldHybridChunksJob : IJobChunk
+    {
+        public ComponentTypeHandle<HybridChunkInfo> HybridChunkInfo;
         [ReadOnly] public ComponentTypeHandle<ChunkWorldRenderBounds> ChunkWorldRenderBounds;
         [ReadOnly] public ComponentTypeHandle<ChunkHeader> ChunkHeader;
         [ReadOnly] public ComponentTypeHandle<LocalToWorld> LocalToWorld;
         [ReadOnly] public ComponentTypeHandle<LODRange> LodRange;
         [ReadOnly] public ComponentTypeHandle<RootLODRange> RootLodRange;
-        [ReadOnly] public SharedComponentTypeHandle<RenderMesh> RenderMesh;
         public HybridChunkUpdater HybridChunkUpdater;
 
         public void Execute(ArchetypeChunk metaChunk, int chunkIndex, int firstEntityIndex)
@@ -678,26 +705,16 @@ namespace Unity.Rendering
                 var chunkInfo = hybridChunkInfos[i];
                 var chunkHeader = chunkHeaders[i];
 
-                var chunk = chunkHeader.ArchetypeChunk;
-
-                // Skip chunks that for some reason have HybridChunkInfo, but don't have the
-                // other required components. This should normally not happen, but can happen
-                // if the user manually deletes some components after the fact.
-                bool hasRenderMesh = chunk.Has(RenderMesh);
-                bool hasLocalToWorld = chunk.Has(LocalToWorld);
-                if (!hasRenderMesh || !hasLocalToWorld)
-                    continue;
-
                 ChunkWorldRenderBounds chunkBounds = chunkBoundsArray[i];
 
                 bool isNewChunk = !chunkInfo.Valid;
-                bool localToWorldChange = chunk.DidChange(LocalToWorld, HybridChunkUpdater.LastSystemVersion);
+                bool localToWorldChange = chunkHeader.ArchetypeChunk.DidChange<LocalToWorld>(LocalToWorld, HybridChunkUpdater.LastSystemVersion);
 
                 // When LOD ranges change, we must reset the movement grace to avoid using stale data
                 bool lodRangeChange =
-                    chunk.DidOrderChange(HybridChunkUpdater.LastSystemVersion) |
-                    chunk.DidChange(LodRange, HybridChunkUpdater.LastSystemVersion) |
-                    chunk.DidChange(RootLodRange, HybridChunkUpdater.LastSystemVersion);
+                    chunkHeader.ArchetypeChunk.DidOrderChange(HybridChunkUpdater.LastSystemVersion) |
+                    chunkHeader.ArchetypeChunk.DidChange<LODRange>(LodRange, HybridChunkUpdater.LastSystemVersion) |
+                    chunkHeader.ArchetypeChunk.DidChange<RootLODRange>(RootLodRange, HybridChunkUpdater.LastSystemVersion);
 
                 if (lodRangeChange)
                     chunkInfo.CullingData.MovementGraceFixed16 = 0;
@@ -706,7 +723,8 @@ namespace Unity.Rendering
                 if (!isNewChunk)
                     HybridChunkUpdater.MarkBatchForUpdates(chunkInfo.InternalIndex, localToWorldChange);
 
-                HybridChunkUpdater.ProcessChunk(chunkInfo, chunk, chunkBounds);
+                HybridChunkUpdater.ProcessChunk(ref chunkInfo, chunkHeader.ArchetypeChunk, chunkBounds);
+                hybridChunkInfos[i] = chunkInfo;
             }
 
             HybridChunkUpdater.FinishExecute();
@@ -716,7 +734,7 @@ namespace Unity.Rendering
     [BurstCompile]
     internal struct UpdateNewHybridChunksJob : IJobParallelFor
     {
-        [ReadOnly] public ComponentTypeHandle<HybridChunkInfo> HybridChunkInfo;
+        public ComponentTypeHandle<HybridChunkInfo> HybridChunkInfo;
         [ReadOnly] public ComponentTypeHandle<ChunkWorldRenderBounds> ChunkWorldRenderBounds;
 
         public NativeArray<ArchetypeChunk> NewChunks;
@@ -731,7 +749,8 @@ namespace Unity.Rendering
 
             Debug.Assert(chunkInfo.Valid, "Attempted to process a chunk with uninitialized Hybrid chunk info");
             HybridChunkUpdater.MarkBatchForUpdates(chunkInfo.InternalIndex, true);
-            HybridChunkUpdater.ProcessValidChunk(chunkInfo, chunk, chunkBounds.Value, true);
+            HybridChunkUpdater.ProcessValidChunk(ref chunkInfo, chunk, chunkBounds.Value, true);
+            chunk.SetChunkComponentData(HybridChunkInfo, chunkInfo);
             HybridChunkUpdater.FinishExecute();
         }
     }
@@ -1085,17 +1104,16 @@ namespace Unity.Rendering
     /// <summary>
     /// Renders all Entities containing both RenderMesh and LocalToWorld components.
     /// </summary>
-#if ENABLE_HYBRID_RENDERER_V2
     [ExecuteAlways]
     //@TODO: Necessary due to empty component group. When Component group and archetype chunks are unified this should be removed
     [AlwaysUpdateSystem]
     [UpdateInGroup(typeof(PresentationSystemGroup))]
     [UpdateAfter(typeof(UpdatePresentationSystemGroup))]
-#else
-    [DisableAutoCreation]
-#endif
-    public unsafe class HybridRendererSystem : JobComponentSystem
+    public unsafe partial class HybridRendererSystem : SystemBase
     {
+        static private bool s_HybridRendererEnabled = true;
+        public static bool HybridRendererEnabled => s_HybridRendererEnabled;
+
         private ulong m_PersistentInstanceDataSize;
 
         private EntityQuery m_CullingJobDependencyGroup;
@@ -1111,7 +1129,8 @@ namespace Unity.Rendering
         private EditorRenderData m_DefaultEditorRenderData = new EditorRenderData { SceneCullingMask = ~0UL };
 #endif
 
-        const int kMaxBatchCount = 64 * 1024;
+        const int kInitialMaxBatchCount = 1 * 1024;
+        const float kMaxBatchGrowFactor = 2f;
         const int kMaxEntitiesPerBatch = 1023; // C++ code is restricted to a certain maximum size
         const int kNumNewChunksPerThread = 1; // TODO: Tune this
         const int kNumScatteredIndicesPerThread = 8; // TODO: Tune this
@@ -1138,22 +1157,23 @@ namespace Unity.Rendering
         private ThreadedSparseUploader m_ThreadedGPUUploader;
         private HeapAllocator m_GPUPersistentAllocator;
         private HeapBlock m_SharedZeroAllocation;
+        private HeapBlock m_SharedAmbientProbeAllocation;
 
         private HeapAllocator m_ChunkMetadataAllocator;
 
-        private NativeArray<BatchInfo> m_BatchInfos;
-        private NativeArray<BatchMotionInfo> m_BatchMotionInfos;
+        private NativeList<BatchInfo> m_BatchInfos;
+        private NativeList<BatchMotionInfo> m_BatchMotionInfos;
 #if USE_PICKING_MATRICES
-        private NativeArray<IntPtr> m_BatchPickingMatrices;
+        private NativeList<IntPtr> m_BatchPickingMatrices;
 #endif
         private NativeArray<ChunkProperty> m_ChunkProperties;
         private NativeHashMap<int, int> m_ExistingBatchInternalIndices;
         private ComponentTypeCache m_ComponentTypeCache;
 
-        private NativeArray<float> m_BatchAABBs;
+        private NativeList<float> m_BatchAABBs;
 
-        private NativeArray<int> m_InternalToExternalIds;
-        private NativeArray<int> m_ExternalToInternalIds;
+        private NativeList<int> m_InternalToExternalIds;
+        private NativeList<int> m_ExternalToInternalIds;
         private NativeList<int> m_InternalIdFreelist;
         private int m_ExternalBatchCount;
         private SortedSet<int> m_SortedInternalIds;
@@ -1167,7 +1187,7 @@ namespace Unity.Rendering
 
         // These arrays are parallel and allocated up to kMaxBatchCount. They are indexed by batch indices.
         // NativeArray<FrozenRenderSceneTag> m_Tags;
-        NativeArray<byte> m_ForceLowLOD;
+        NativeList<byte> m_ForceLowLOD;
 
 #if UNITY_EDITOR
         float m_CamMoveDistance;
@@ -1201,12 +1221,19 @@ namespace Unity.Rendering
         float3 m_PrevCameraPos;
         float m_PrevLodDistanceScale;
 
+        enum DefaultValueKind
+        {
+            ZeroDefault,
+            NonzeroDefault,
+            SharedBuiltin,
+        }
+
         struct MaterialPropertyType
         {
             public int TypeIndex;
             public short SizeBytesCPU;
             public short SizeBytesGPU;
-            public bool OverriddenDefault;
+            public DefaultValueKind DefaultValueKind;
         };
 
         struct PropertyMapping
@@ -1227,6 +1254,7 @@ namespace Unity.Rendering
         Dictionary<int, string> m_MaterialPropertyNames;
         Dictionary<int, string> m_MaterialPropertyTypeNames;
         Dictionary<int, float4x4> m_MaterialPropertyDefaultValues;
+        Dictionary<int, int> m_MaterialPropertySharedBuiltins;
         static Dictionary<Type, PropertyMapping> s_TypeToPropertyMappings = new Dictionary<Type, PropertyMapping>();
 
 #if USE_UNITY_OCCLUSION
@@ -1242,9 +1270,13 @@ namespace Unity.Rendering
 #endif
 
         NativeHashMap<EntityArchetype, SharedComponentOverridesInfo> m_ArchetypeSharedOverrideInfos;
+
+        private SHProperties m_GlobalAmbientProbe;
+        private bool m_GlobalAmbientProbeDirty;
+
         public struct SharedComponentOverridesInfo
         {
-            public UnsafeList SharedOverrideTypeIndices;
+            public UnsafeList<int> SharedOverrideTypeIndices;
             public ulong SharedOverrideHash;
         }
 
@@ -1339,6 +1371,7 @@ namespace Unity.Rendering
                 }
 
                 public bool IsCompatibleWith(EntityManager entityManager,
+                    HybridRendererSystem system,
                     BatchCreateInfoFactory createInfoFactory,
                     BatchSortEntry e)
                 {
@@ -1393,7 +1426,7 @@ namespace Unity.Rendering
                         if (typeIndex != ti1)
                             return false;
 
-                        var handle = entityManager.GetDynamicSharedComponentTypeHandle(ComponentType.ReadOnly(typeIndex));
+                        var handle = system.GetDynamicSharedComponentTypeHandle(ComponentType.ReadOnly(typeIndex));
                         var c0 = Chunk.GetSharedComponentDataBoxed(handle, entityManager) as IHybridSharedComponentFloat4Override;
                         var c1 = e.Chunk.GetSharedComponentDataBoxed(handle, entityManager) as IHybridSharedComponentFloat4Override;
                         var v0 = c0.GetFloat4OverrideData();
@@ -1470,9 +1503,9 @@ namespace Unity.Rendering
             public BatchCreateInfo CreateInfoFor(int sortedIndex) =>
                 m_CreateInfoFactory.CreateInfoForChunk(m_Chunks[SortedIndex(sortedIndex)]);
 
-            public bool IsCompatible(EntityManager entityManager, int sortedI, int sortedJ)
+            public bool IsCompatible(EntityManager entityManager, HybridRendererSystem system, int sortedI, int sortedJ)
             {
-                return m_SortEntries[SortedIndex(sortedI)].IsCompatibleWith(entityManager, m_CreateInfoFactory, m_SortEntries[SortedIndex(sortedJ)]);
+                return m_SortEntries[SortedIndex(sortedI)].IsCompatibleWith(entityManager, system, m_CreateInfoFactory, m_SortEntries[SortedIndex(sortedJ)]);
             }
 
             public int Compare(int x, int y)
@@ -1550,14 +1583,12 @@ namespace Unity.Rendering
                 return nullInfo;
             }
 
-            var overridesArray = new UnsafeList(
-                sizeof(int),
-                UnsafeUtility.AlignOf<int>(),
+            var overridesArray = new UnsafeList<int>(
                 numOverrides,
                 Allocator.Persistent,
                 NativeArrayOptions.UninitializedMemory);
-            overridesArray.Resize<int>(numOverrides, NativeArrayOptions.UninitializedMemory);
-            var overrides = (int*) overridesArray.Ptr;
+            overridesArray.Resize(numOverrides, NativeArrayOptions.UninitializedMemory);
+            var overrides = overridesArray.Ptr;
 
             int j = 0;
             for (int i = 0; i < componentTypes.Length; ++i)
@@ -1605,6 +1636,7 @@ namespace Unity.Rendering
             SharedZeroDefault, // Property uses a zero bit pattern value for all entities
             SharedNonzeroDefault, // Property uses a shared value for all entities, but it's not zero
             SharedComponentOverride, // Property uses a shared value that is read from a shared component
+            SharedBuiltin, // Property uses a shared value that is set by special fixed function code
             PerEntityOverride, // Property uses per-entity unique values
         }
 
@@ -1612,7 +1644,7 @@ namespace Unity.Rendering
             status == BatchPropertyOverrideStatus.SharedZeroDefault;
 
         private static bool PropertyRequiresAllocation(BatchPropertyOverrideStatus status) =>
-            !PropertyIsZero(status);
+            !PropertyIsZero(status) && status != BatchPropertyOverrideStatus.SharedBuiltin;
 
         private static bool PropertyRequiresBlit(BatchPropertyOverrideStatus status) =>
             status == BatchPropertyOverrideStatus.SharedNonzeroDefault ||
@@ -1643,6 +1675,7 @@ namespace Unity.Rendering
                 public int CbufferIndex;
                 public int OverrideComponentsIndex;
                 public int OverrideSharedComponentsIndex;
+                public int SharedBuiltinOffset;
 #if USE_PROPERTY_ASSERTS
                 public int NameID;
 #endif
@@ -1678,6 +1711,21 @@ namespace Unity.Rendering
 
         protected override void OnCreate()
         {
+
+            // If all graphics rendering has been disabled, early out from all HR functionality
+#if HYBRID_RENDERER_DISABLED
+            s_HybridRendererEnabled = false;
+#else
+            s_HybridRendererEnabled = HybridUtils.IsHybridSupportedOnSystem();
+#endif
+            if (!s_HybridRendererEnabled)
+            {
+#if !DISABLE_HYBRID_V2_SRP_LOGS
+                Debug.Log("No SRP present, no compute shader support, or running with -nographics. Hybrid Renderer disabled");
+#endif
+                return;
+            }
+
             m_PersistentInstanceDataSize = kGPUBufferSizeInitial;
 
             //@TODO: Support SetFilter with EntityQueryDesc syntax
@@ -1716,23 +1764,23 @@ namespace Unity.Rendering
 
             m_BatchRendererGroup = new BatchRendererGroup(this.OnPerformCulling);
             // m_Tags = new NativeArray<FrozenRenderSceneTag>(kMaxBatchCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-            m_ForceLowLOD = new NativeArray<byte>(kMaxBatchCount, Allocator.Persistent,
-                NativeArrayOptions.UninitializedMemory);
+            m_ForceLowLOD = NewNativeListResized<byte>(kInitialMaxBatchCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+
             m_ResetLod = true;
 
             m_GPUPersistentAllocator = new HeapAllocator(kMaxGPUAllocatorMemory, 16);
             m_ChunkMetadataAllocator = new HeapAllocator(kMaxChunkMetadata);
 
-            m_BatchInfos = new NativeArray<BatchInfo>(kMaxBatchCount, Allocator.Persistent);
-            m_BatchMotionInfos = new NativeArray<BatchMotionInfo>(kMaxBatchCount, Allocator.Persistent);
+            m_BatchInfos = NewNativeListResized<BatchInfo>(kInitialMaxBatchCount, Allocator.Persistent);
+            m_BatchMotionInfos = NewNativeListResized<BatchMotionInfo>(kInitialMaxBatchCount, Allocator.Persistent);
 #if USE_PICKING_MATRICES
-            m_BatchPickingMatrices = new NativeArray<IntPtr>(kMaxBatchCount, Allocator.Persistent);
+            m_BatchPickingMatrices = NewNativeListResized<IntPtr>(kInitialMaxBatchCount, Allocator.Persistent);
 #endif
             m_ChunkProperties = new NativeArray<ChunkProperty>(kMaxChunkMetadata, Allocator.Persistent);
             m_ExistingBatchInternalIndices = new NativeHashMap<int, int>(128, Allocator.Persistent);
             m_ComponentTypeCache = new ComponentTypeCache(128);
 
-            m_BatchAABBs = new NativeArray<float>(kMaxBatchCount * (int)HybridChunkUpdater.kFloatsPerAABB, Allocator.Persistent);
+            m_BatchAABBs = NewNativeListResized<float>(kInitialMaxBatchCount * (int)HybridChunkUpdater.kFloatsPerAABB, Allocator.Persistent);
 
             m_DefaultValueBlits = new NativeList<DefaultValueBlitDescriptor>(Allocator.Persistent);
 
@@ -1751,16 +1799,19 @@ namespace Unity.Rendering
                 Count = 1,
             });
 
+            m_SharedAmbientProbeAllocation = m_GPUPersistentAllocator.Allocate((ulong)UnsafeUtility.SizeOf<SHProperties>());
+            Debug.Assert(!m_SharedAmbientProbeAllocation.Empty, "Allocation of the global ambient probe failed");
+            UpdateGlobalAmbientProbe(new SHProperties());
+
             ResetIds();
 
-            m_MetaEntitiesForHybridRenderableChunks = EntityManager.CreateEntityQuery(
+            m_MetaEntitiesForHybridRenderableChunks = GetEntityQuery(
                 new EntityQueryDesc
                 {
                     All = new[]
                     {
                         ComponentType.ReadWrite<HybridChunkInfo>(),
                         ComponentType.ReadOnly<ChunkHeader>(),
-                        ComponentType.ReadOnly<ChunkWorldRenderBounds>(),
                     },
                 });
 
@@ -1776,6 +1827,7 @@ namespace Unity.Rendering
             m_MaterialPropertyNames = new Dictionary<int, string>();
             m_MaterialPropertyTypeNames = new Dictionary<int, string>();
             m_MaterialPropertyDefaultValues = new Dictionary<int, float4x4>();
+            m_MaterialPropertySharedBuiltins = new Dictionary<int, int>();
             m_ArchetypeSharedOverrideInfos =
                 new NativeHashMap<EntityArchetype, SharedComponentOverridesInfo>(256, Allocator.Persistent);
 
@@ -1789,12 +1841,18 @@ namespace Unity.Rendering
 #endif
 
             // Ifdef guard registering types that might not exist if V2 is disabled.
-#if ENABLE_HYBRID_RENDERER_V2
             // Explicitly use a default of all ones for probe occlusion, so stuff doesn't render as black if this isn't set.
             RegisterMaterialPropertyType<BuiltinMaterialPropertyUnity_ProbesOcclusion>(
                 "unity_ProbesOcclusion",
                 defaultValue: new float4(1, 1, 1, 1));
-#endif
+
+            RegisterSharedBuiltin("unity_SHAr", (int) m_SharedAmbientProbeAllocation.begin + SHProperties.kOffsetOfSHAr);
+            RegisterSharedBuiltin("unity_SHAg", (int) m_SharedAmbientProbeAllocation.begin + SHProperties.kOffsetOfSHAg);
+            RegisterSharedBuiltin("unity_SHAb", (int) m_SharedAmbientProbeAllocation.begin + SHProperties.kOffsetOfSHAb);
+            RegisterSharedBuiltin("unity_SHBr", (int) m_SharedAmbientProbeAllocation.begin + SHProperties.kOffsetOfSHBr);
+            RegisterSharedBuiltin("unity_SHBg", (int) m_SharedAmbientProbeAllocation.begin + SHProperties.kOffsetOfSHBg);
+            RegisterSharedBuiltin("unity_SHBb", (int) m_SharedAmbientProbeAllocation.begin + SHProperties.kOffsetOfSHBb);
+            RegisterSharedBuiltin("unity_SHC",  (int) m_SharedAmbientProbeAllocation.begin + SHProperties.kOffsetOfSHC);
 
             foreach (var typeInfo in TypeManager.AllTypes)
             {
@@ -1861,6 +1919,35 @@ namespace Unity.Rendering
                 m_ErrorMaterial = new Material(hybridErrorShader);
         }
 
+        private void RegisterSharedBuiltin(string propertyName, int sharedBuiltinOffset)
+        {
+            int nameID = Shader.PropertyToID(propertyName);
+            m_MaterialPropertySharedBuiltins[nameID] = sharedBuiltinOffset;
+        }
+
+        private void BlitBytes(HeapBlock heapBlock, void* bytes, int sizeBytes)
+        {
+            int size4x4 = UnsafeUtility.SizeOf<float4x4>();
+            int offset = 0;
+
+            // Since each default blit can only copy a float4x4, split to multiple blits
+            while (sizeBytes > 0)
+            {
+                int blitSize = math.min(sizeBytes, size4x4);
+                var desc = new DefaultValueBlitDescriptor
+                {
+                    DestinationOffset = (uint) heapBlock.begin + (uint)offset,
+                    ValueSizeBytes = (uint)blitSize,
+                    Count = 1,
+                };
+                UnsafeUtility.MemCpy(&desc.DefaultValue, (byte*)bytes + offset, blitSize);
+                m_DefaultValueBlits.Add(desc);
+
+                sizeBytes -= blitSize;
+                offset += blitSize;
+            }
+        }
+
         public static void RegisterMaterialPropertyType(Type type, string propertyName, short overrideTypeSizeGPU = -1, MaterialPropertyDefaultValue defaultValue = default)
         {
             Debug.Assert(type != null, "type must be non-null");
@@ -1915,6 +2002,14 @@ namespace Unity.Rendering
                 var defaultValue = kv.Value.DefaultValue;
                 bool isShared = kv.Value.IsShared;
 
+                DefaultValueKind defaultKind;
+                if (m_MaterialPropertySharedBuiltins.ContainsKey(nameID))
+                    defaultKind = DefaultValueKind.SharedBuiltin;
+                else
+                    defaultKind = defaultValue.Nonzero
+                        ? DefaultValueKind.NonzeroDefault
+                        : DefaultValueKind.ZeroDefault;
+
                 if (isShared)
                 {
                     m_MaterialPropertyTypesShared.Add(nameID,
@@ -1923,7 +2018,7 @@ namespace Unity.Rendering
                             TypeIndex = typeIndex,
                             SizeBytesCPU = sizeBytesCPU,
                             SizeBytesGPU = sizeBytesGPU,
-                            OverriddenDefault = defaultValue.Nonzero,
+                            DefaultValueKind = defaultKind,
                         });
                     m_SharedComponentOverrideTypeIndices.Add(typeIndex);
                 }
@@ -1935,7 +2030,7 @@ namespace Unity.Rendering
                             TypeIndex = typeIndex,
                             SizeBytesCPU = sizeBytesCPU,
                             SizeBytesGPU = sizeBytesGPU,
-                            OverriddenDefault = defaultValue.Nonzero,
+                            DefaultValueKind = defaultKind,
                         });
                 }
 
@@ -1948,7 +2043,7 @@ namespace Unity.Rendering
 #endif
 
 #if DEBUG_LOG_MATERIAL_PROPERTIES
-                Debug.Log($"Type \"{type.Name}\" ({sizeBytesCPU} bytes) overrides material property \"{propertyName}\" (nameID: {nameID}, typeIndex: {typeIndex})");
+                Debug.Log($"Type \"{type.Name}\" ({sizeBytesCPU} bytes) overrides material property \"{propertyName}\" (nameID: {nameID}, typeIndex: {typeIndex}, defaultKind: {defaultKind})");
 #endif
 
                 // We cache all IComponentData types that we know are capable of overriding properties
@@ -1961,6 +2056,7 @@ namespace Unity.Rendering
 
         protected override void OnDestroy()
         {
+            if (!s_HybridRendererEnabled) return;
             CompleteJobs();
             Dispose();
         }
@@ -1970,7 +2066,7 @@ namespace Unity.Rendering
             get
             {
 #if UNITY_EDITOR
-                return m_ShaderReflectionChangesSystem != null ? m_ShaderReflectionChangesSystem.HasReflectionChanged : false;
+                return m_ShaderReflectionChangesSystem.HasReflectionChanged;
 #else
                 return false;
 #endif
@@ -2026,10 +2122,12 @@ namespace Unity.Rendering
 #endif
         }
 
-        protected override JobHandle OnUpdate(JobHandle inputDeps)
+        protected override void OnUpdate()
         {
+            if (!s_HybridRendererEnabled) return;
+
             Profiler.BeginSample("CompleteJobs");
-            inputDeps.Complete(); // #todo
+            Dependency.Complete(); // #todo
             CompleteJobs();
             ResetLod();
             Profiler.EndSample();
@@ -2039,7 +2137,7 @@ namespace Unity.Rendering
             {
 
                 Profiler.BeginSample("UpdateHybridV2Batches");
-                done = UpdateHybridV2Batches(inputDeps);
+                done = UpdateHybridV2Batches(Dependency);
                 Profiler.EndSample();
 
                 Profiler.BeginSample("EndUpdate");
@@ -2053,38 +2151,65 @@ namespace Unity.Rendering
 
             HybridEditorTools.EndFrame();
 
-            return done;
+            Dependency = done;
         }
 
         private void ResetIds()
         {
             if (m_InternalToExternalIds.IsCreated) m_InternalToExternalIds.Dispose();
-            m_InternalToExternalIds = new NativeArray<int>(kMaxBatchCount, Allocator.Persistent,
-                NativeArrayOptions.UninitializedMemory);
+            m_InternalToExternalIds = new NativeList<int>(kInitialMaxBatchCount, Allocator.Persistent);
+            ResizeWithMinusOne(m_InternalToExternalIds, kInitialMaxBatchCount);
 
             if (m_ExternalToInternalIds.IsCreated) m_ExternalToInternalIds.Dispose();
-            m_ExternalToInternalIds = new NativeArray<int>(kMaxBatchCount, Allocator.Persistent,
-                NativeArrayOptions.UninitializedMemory);
-
-            for (int i = 0; i < m_InternalToExternalIds.Length; ++i) m_InternalToExternalIds[i] = -1;
-            for (int i = 0; i < m_ExternalToInternalIds.Length; ++i) m_ExternalToInternalIds[i] = -1;
+            m_ExternalToInternalIds = new NativeList<int>(kInitialMaxBatchCount, Allocator.Persistent);
+            ResizeWithMinusOne(m_ExternalToInternalIds, kInitialMaxBatchCount);
 
             m_ExternalBatchCount = 0;
             m_SortedInternalIds = new SortedSet<int>();
 
             if (m_InternalIdFreelist.IsCreated) m_InternalIdFreelist.Dispose();
-            m_InternalIdFreelist = new NativeList<int>(kMaxBatchCount, Allocator.Persistent);
+            m_InternalIdFreelist = new NativeList<int>(kInitialMaxBatchCount, Allocator.Persistent);
 
-            for (int i = m_InternalToExternalIds.Length - 1; i >= 0; --i)
+            for (int i = kInitialMaxBatchCount - 1; i >= 0; --i)
                 m_InternalIdFreelist.Add(i);
+        }
+
+        internal void EnsureHaveSpaceForNewBatch()
+        {
+            if (m_InternalIdFreelist.Length > 0) return;
+
+            Debug.Assert(m_ExternalBatchCount > 0);
+            Debug.Assert(kMaxBatchGrowFactor >= 1f,
+                "Grow factor should always be greater or equal to 1");
+
+            var newCapacity = (int)(kMaxBatchGrowFactor * m_ExternalBatchCount);
+            m_InternalIdFreelist.Capacity = newCapacity;
+
+            for (int i = newCapacity - 1; i >= m_ExternalBatchCount; --i)
+                m_InternalIdFreelist.Add(i);
+
+            ResizeWithMinusOne(m_ExternalToInternalIds, newCapacity);
+            ResizeWithMinusOne(m_InternalToExternalIds, newCapacity);
+            m_ForceLowLOD.Resize(newCapacity, NativeArrayOptions.ClearMemory);
+            m_BatchAABBs.Resize(newCapacity * (int)HybridChunkUpdater.kFloatsPerAABB, NativeArrayOptions.ClearMemory);
+            m_BatchInfos.Resize(newCapacity, NativeArrayOptions.ClearMemory);
+            m_BatchMotionInfos.Resize(newCapacity, NativeArrayOptions.ClearMemory);
+
+#if USE_PICKING_MATRICES
+            m_BatchPickingMatrices.Resize(newCapacity, NativeArrayOptions.ClearMemory);
+#endif
         }
 
         internal int AllocateInternalId()
         {
-            if (!(m_InternalIdFreelist.Length > 0)) Debug.Assert(false, $"Maximum Hybrid Renderer batch count ({kMaxBatchCount}) exceeded.");
+            EnsureHaveSpaceForNewBatch();
+
             int id = m_InternalIdFreelist[m_InternalIdFreelist.Length - 1];
+
             m_InternalIdFreelist.Resize(m_InternalIdFreelist.Length - 1, NativeArrayOptions.UninitializedMemory);
+
             Debug.Assert(!m_SortedInternalIds.Contains(id), "Freshly allocated batch id found in list of used ids");
+
             m_SortedInternalIds.Add(id);
             return id;
         }
@@ -2174,8 +2299,6 @@ namespace Unity.Rendering
             m_ComponentTypeCache.Dispose();
 
             m_BatchAABBs.Dispose();
-
-            m_MetaEntitiesForHybridRenderableChunks.Dispose();
 
             if (m_InternalToExternalIds.IsCreated) m_InternalToExternalIds.Dispose();
             if (m_ExternalToInternalIds.IsCreated) m_ExternalToInternalIds.Dispose();
@@ -2344,34 +2467,48 @@ namespace Unity.Rendering
             return m_CullingJobDependency;
         }
 
+#if UNITY_ANDROID && !UNITY_64
+        // There is a crash bug on ARMv7 potentially related to a compiler bug in the tool chain.
+        // We will have to leave this function without optimizations on that platform.
+        [MethodImpl(MethodImplOptions.NoOptimization)]
+#endif
         public JobHandle UpdateAllBatches(JobHandle inputDependencies)
         {
-            m_DefaultValueBlits.Clear();
-
             Profiler.BeginSample("GetComponentTypes");
-            var hybridRenderedChunkType =
-                GetComponentTypeHandle<HybridChunkInfo>();
+
+            var hybridRenderedChunkTypeRO = GetComponentTypeHandle<HybridChunkInfo>(true);
+            var hybridRenderedChunkType = GetComponentTypeHandle<HybridChunkInfo>(false);
+            var chunkHeadersRO = GetComponentTypeHandle<ChunkHeader>(true);
+            var chunkWorldRenderBoundsRO = GetComponentTypeHandle<ChunkWorldRenderBounds>(true);
+            var localToWorldsRO = GetComponentTypeHandle<LocalToWorld>(true);
+            var lodRangesRO = GetComponentTypeHandle<LODRange>(true);
+            var rootLodRangesRO = GetComponentTypeHandle<RootLODRange>(true);
+
             m_ComponentTypeCache.FetchTypeHandles(this);
+
             Profiler.EndSample();
 
-            int numNewChunks = 0;
+            var numNewChunksArray = new NativeArray<int>(1, Allocator.TempJob);
+            int totalChunks = m_HybridRenderedQuery.CalculateChunkCount();
+            var newChunks = new NativeArray<ArchetypeChunk>(
+                totalChunks,
+                Allocator.TempJob,
+                NativeArrayOptions.UninitializedMemory);
+
+            var classifyNewChunksJob = new ClassifyNewChunksJob
+            {
+                HybridChunkInfo = hybridRenderedChunkTypeRO,
+                ChunkHeader = chunkHeadersRO,
+                NumNewChunks = numNewChunksArray,
+                NewChunks = newChunks
+            }
+            .Schedule(m_MetaEntitiesForHybridRenderableChunks, inputDependencies);
+
             JobHandle hybridCompleted = new JobHandle();
 
             const int kNumBitsPerLong = sizeof(long) * 8;
             var unreferencedInternalIndices = new NativeArray<long>(
                 (InternalIndexRange + kNumBitsPerLong) / kNumBitsPerLong,
-                Allocator.TempJob,
-                NativeArrayOptions.ClearMemory);
-
-            // Allocate according to max batch count for these, so they can also handle potential
-            // new batches during the frame.
-            var batchRequiresUpdates = new NativeArray<long>(
-                kMaxBatchCount / kNumBitsPerLong,
-                Allocator.TempJob,
-                NativeArrayOptions.ClearMemory);
-
-            var batchHadMovingEntities = new NativeArray<long>(
-                kMaxBatchCount / kNumBitsPerLong,
                 Allocator.TempJob,
                 NativeArrayOptions.ClearMemory);
 
@@ -2385,16 +2522,6 @@ namespace Unity.Rendering
             existingKeys.Dispose(initializedUnreferenced);
 
             inputDependencies = JobHandle.CombineDependencies(inputDependencies, initializedUnreferenced);
-
-            int totalChunks = m_HybridRenderedQuery.CalculateChunkCount();
-            var newChunks = new NativeArray<ArchetypeChunk>(
-                totalChunks,
-                Allocator.TempJob,
-                NativeArrayOptions.UninitializedMemory);
-            var numNewChunksArray = new NativeArray<int>(
-                1,
-                Allocator.TempJob,
-                NativeArrayOptions.ClearMemory);
 
             // Conservative estimate is that every known type is in every chunk. There will be
             // at most one operation per type per chunk, which will be either an actual
@@ -2417,14 +2544,30 @@ namespace Unity.Rendering
                 lastSystemVersion = 0;
             }
 
+            classifyNewChunksJob.Complete();
+            int numNewChunks = numNewChunksArray[0];
+
+            var maxBatchCount = math.max(kInitialMaxBatchCount, InternalIndexRange + numNewChunks);
+
+            // Integer division with round up
+            var maxBatchLongCount = (maxBatchCount + kNumBitsPerLong - 1) / kNumBitsPerLong;
+
+            var batchRequiresUpdates = new NativeArray<long>(
+                maxBatchLongCount,
+                Allocator.TempJob,
+                NativeArrayOptions.ClearMemory);
+
+            var batchHadMovingEntities = new NativeArray<long>(
+                maxBatchLongCount,
+                Allocator.TempJob,
+                NativeArrayOptions.ClearMemory);
+
             var hybridChunkUpdater = new HybridChunkUpdater
             {
                 ComponentTypes = m_ComponentTypeCache.ToBurstCompatible(Allocator.TempJob),
                 UnreferencedInternalIndices = unreferencedInternalIndices,
                 BatchRequiresUpdates = batchRequiresUpdates,
                 BatchHadMovingEntities = batchHadMovingEntities,
-                NewChunks = newChunks,
-                NumNewChunks = numNewChunksArray,
                 ChunkProperties = m_ChunkProperties,
                 BatchMotionInfos = m_BatchMotionInfos,
                 BatchAABBs = m_BatchAABBs,
@@ -2448,29 +2591,26 @@ namespace Unity.Rendering
 #endif
             };
 
-            var updateAllJob = new UpdateAllHybridChunksJob
+            var updateOldJob = new UpdateOldHybridChunksJob
             {
-                HybridChunkInfo = GetComponentTypeHandle<HybridChunkInfo>(true),
-                ChunkWorldRenderBounds = GetComponentTypeHandle<ChunkWorldRenderBounds>(true),
-                ChunkHeader = GetComponentTypeHandle<ChunkHeader>(true),
-                LocalToWorld = GetComponentTypeHandle<LocalToWorld>(true),
-                LodRange = GetComponentTypeHandle<LODRange>(true),
-                RootLodRange = GetComponentTypeHandle<RootLODRange>(true),
-                RenderMesh = GetSharedComponentTypeHandle<RenderMesh>(),
+                HybridChunkInfo = hybridRenderedChunkType,
+                ChunkWorldRenderBounds = chunkWorldRenderBoundsRO,
+                ChunkHeader = chunkHeadersRO,
+                LocalToWorld = localToWorldsRO,
+                LodRange = lodRangesRO,
+                RootLodRange = rootLodRangesRO,
                 HybridChunkUpdater = hybridChunkUpdater,
             };
 
-            JobHandle updateAllDependencies = JobHandle.CombineDependencies(inputDependencies, EnsureAABBsCleared());
+            JobHandle updateOldDependencies = JobHandle.CombineDependencies(inputDependencies, EnsureAABBsCleared());
 
             // We need to wait for the job to complete here so we can process the new chunks
-            updateAllJob.Schedule(m_MetaEntitiesForHybridRenderableChunks, updateAllDependencies).Complete();
+            updateOldJob.Schedule(m_MetaEntitiesForHybridRenderableChunks, updateOldDependencies).Complete();
 
             // Garbage collect deleted batches before adding new ones to minimize peak memory use.
             Profiler.BeginSample("GarbageCollectUnreferencedBatches");
             int numRemoved = GarbageCollectUnreferencedBatches(unreferencedInternalIndices);
             Profiler.EndSample();
-
-            numNewChunks = numNewChunksArray[0];
 
             if (numNewChunks > 0)
             {
@@ -2478,15 +2618,13 @@ namespace Unity.Rendering
                 int numValidNewChunks = AddNewChunks(newChunks.GetSubArray(0, numNewChunks));
                 Profiler.EndSample();
 
-                // Must make a new array so the arrays are valid and don't alias.
-                hybridChunkUpdater.NewChunks = new NativeArray<ArchetypeChunk>(1, Allocator.TempJob);
                 hybridChunkUpdater.PreviousBatchIndex = -1;
 
                 var updateNewChunksJob = new UpdateNewHybridChunksJob
                 {
                     NewChunks = newChunks,
-                    HybridChunkInfo = GetComponentTypeHandle<HybridChunkInfo>(true),
-                    ChunkWorldRenderBounds = GetComponentTypeHandle<ChunkWorldRenderBounds>(true),
+                    HybridChunkInfo = hybridRenderedChunkType,
+                    ChunkWorldRenderBounds = chunkWorldRenderBoundsRO,
                     HybridChunkUpdater = hybridChunkUpdater,
                 };
 
@@ -2496,7 +2634,6 @@ namespace Unity.Rendering
 #endif
 
                 hybridCompleted = updateNewChunksJob.Schedule(numValidNewChunks, kNumNewChunksPerThread);
-                hybridChunkUpdater.NewChunks.Dispose(hybridCompleted);
             }
 
             hybridChunkUpdater.ComponentTypes.Dispose(hybridCompleted);
@@ -2511,6 +2648,7 @@ namespace Unity.Rendering
             int numGpuUploadOperations = numGpuUploadOperationsArray[0];
             Debug.Assert(numGpuUploadOperations <= gpuUploadOperations.Length, "Maximum GPU upload operation count exceeded");
 
+            BlitGlobalAmbientProbe();
             ComputeUploadSizeRequirements(
                 numGpuUploadOperations, gpuUploadOperations,
                 out int numOperations, out int totalUploadBytes, out int biggestUploadBytes);
@@ -2816,7 +2954,7 @@ namespace Unity.Rendering
                 if (i < sortedNewChunks.Length)
                 {
                     var chunk = sortedNewChunks[i];
-                    breakBatch = !batchCompatibility.IsCompatible(EntityManager, batchBegin, i);
+                    breakBatch = !batchCompatibility.IsCompatible(EntityManager, this, batchBegin, i);
                     instancesInChunk = chunk.Capacity;
                 }
                 else
@@ -2893,13 +3031,13 @@ namespace Unity.Rendering
                 Allocator.Persistent,
                 NativeArrayOptions.ClearMemory);
 
-            bool zeroDefault = true;
             float4x4 defaultValue = default;
 
             for (int i = 0; i < shaderProperties.Length; ++i)
             {
                 var shaderProperty = shaderProperties[i];
                 int nameID = shaderProperty.ConstantNameID;
+                BatchPropertyOverrideStatus overrideStatus = BatchPropertyOverrideStatus.Uninitialized;
 
                 bool isBuiltin = shaderProperty.CbufferIndex == kBuiltinCbufferIndex;
 
@@ -2936,17 +3074,28 @@ namespace Unity.Rendering
                             // Instead, check whether one was registered manually when the overriding type
                             // was registered. In case there are several overriding types, we use the first
                             // one with a registered value.
-                            if (isBuiltin && zeroDefault && materialPropertyType.OverriddenDefault)
+                            if (isBuiltin && overrideStatus == BatchPropertyOverrideStatus.Uninitialized)
                             {
-                                defaultValue = m_MaterialPropertyDefaultValues[materialPropertyType.TypeIndex];
-                                zeroDefault = false;
+                                switch (materialPropertyType.DefaultValueKind)
+                                {
+                                    case DefaultValueKind.ZeroDefault:
+                                    default:
+                                        break;
+                                    case DefaultValueKind.NonzeroDefault:
+                                        defaultValue = m_MaterialPropertyDefaultValues[materialPropertyType.TypeIndex];
+                                        overrideStatus = BatchPropertyOverrideStatus.SharedNonzeroDefault;
+                                        break;
+                                    case DefaultValueKind.SharedBuiltin:
+                                        overrideStatus = BatchPropertyOverrideStatus.SharedBuiltin;
+                                        break;
+                                }
                             }
                         }
                         else
                         {
 #if USE_PROPERTY_ASSERTS
                             Debug.Log(
-                                $"Shader expects property \"{m_MaterialPropertyNames[nameID]}\" to have size {shaderProperty.SizeBytes}, but overriding component \"{m_MaterialPropertyTypeNames[materialPropertyType.TypeIndex]}\" has size {materialPropertyType.SizeBytesGPU} instead.");
+                                $"Shader \"{material.shader.name}\" expects property \"{m_MaterialPropertyNames[nameID]}\" to have size {shaderProperty.SizeBytes}, but overriding component \"{m_MaterialPropertyTypeNames[materialPropertyType.TypeIndex]}\" has size {materialPropertyType.SizeBytesGPU} instead.");
 #endif
                         }
 
@@ -2986,7 +3135,7 @@ namespace Unity.Rendering
                             {
 #if USE_PROPERTY_ASSERTS
                                 Debug.Log(
-                                    $"Shader expects property \"{m_MaterialPropertyNames[nameID]}\" to have size {sizeCPU}, but overriding shared component \"{m_MaterialPropertyTypeNames[sharedMaterialPropertyType.TypeIndex]}\" has size {sharedMaterialPropertyType.SizeBytesGPU} instead.");
+                                    $"Shader \"{material.shader.name}\" expects property \"{m_MaterialPropertyNames[nameID]}\" to have size {sizeCPU}, but overriding shared component \"{m_MaterialPropertyTypeNames[sharedMaterialPropertyType.TypeIndex]}\" has size {sharedMaterialPropertyType.SizeBytesGPU} instead.");
 #endif
                             }
                         }
@@ -2994,7 +3143,7 @@ namespace Unity.Rendering
                         {
 #if USE_PROPERTY_ASSERTS
                             Debug.Log(
-                                $"Shader expects property \"{m_MaterialPropertyNames[nameID]}\" to have size {shaderProperty.SizeBytes}, but overriding component \"{m_MaterialPropertyTypeNames[sharedMaterialPropertyType.TypeIndex]}\" has size {sharedMaterialPropertyType.SizeBytesGPU} instead.");
+                                $"Shader \"{material.shader.name}\" expects property \"{m_MaterialPropertyNames[nameID]}\" to have size {shaderProperty.SizeBytes}, but overriding component \"{m_MaterialPropertyTypeNames[sharedMaterialPropertyType.TypeIndex]}\" has size {sharedMaterialPropertyType.SizeBytesGPU} instead.");
 #endif
                         }
 
@@ -3003,12 +3152,32 @@ namespace Unity.Rendering
                     }
                 }
 
+                int sharedBuiltinOffset = -1;
                 // For non-builtin properties, we can always ask the material for defaults.
                 if (!isBuiltin)
                 {
                     var propertyDefault = DefaultValueFromMaterial(material, nameID, shaderProperty.SizeBytes);
                     defaultValue = propertyDefault.Value;
-                    zeroDefault = !propertyDefault.Nonzero;
+                    overrideStatus = propertyDefault.Nonzero
+                        ? BatchPropertyOverrideStatus.SharedNonzeroDefault
+                        : BatchPropertyOverrideStatus.SharedZeroDefault;
+                }
+                // Builtins for which nothing special has been found use a zero default
+                else if (overrideStatus == BatchPropertyOverrideStatus.Uninitialized)
+                {
+                    overrideStatus = BatchPropertyOverrideStatus.SharedZeroDefault;
+                }
+                else if (overrideStatus == BatchPropertyOverrideStatus.SharedBuiltin)
+                {
+                    if (!m_MaterialPropertySharedBuiltins.TryGetValue(nameID, out sharedBuiltinOffset))
+                    {
+#if USE_PROPERTY_ASSERTS
+                        Debug.Log($"Shader property \"{m_MaterialPropertyNames[nameID]}\" is configured to use a shared built-in value, but it was not found.");
+#endif
+
+                        // Fall back to zero
+                        overrideStatus = BatchPropertyOverrideStatus.SharedZeroDefault;
+                    }
                 }
 
                 properties.Add(new BatchInfo.BatchProperty
@@ -3018,9 +3187,8 @@ namespace Unity.Rendering
                     SizeBytesGPU = (short)shaderProperty.SizeBytes,
                     CbufferIndex = shaderProperty.CbufferIndex,
                     OverrideComponentsIndex = overridesStartIndex,
-                    OverrideStatus = zeroDefault
-                        ? BatchPropertyOverrideStatus.SharedZeroDefault
-                        : BatchPropertyOverrideStatus.SharedNonzeroDefault,
+                    SharedBuiltinOffset = sharedBuiltinOffset,
+                    OverrideStatus = overrideStatus,
                     DefaultValue = defaultValue,
 #if USE_PROPERTY_ASSERTS
                     NameID = nameID,
@@ -3150,7 +3318,7 @@ namespace Unity.Rendering
                     }
                     break;
                 case 64:
-                    propertyDefaultValue = new MaterialPropertyDefaultValue((float4x4)material.GetMatrix(nameID));
+                    propertyDefaultValue = float4x4.identity;   // matrix4x4 can't have default value in unity (you can't edit a matrix in a material inspector) (case 1339072)
                     break;
                 default:
                     Debug.LogWarning($"Unsupported size for a material property with nameID {nameID}");
@@ -3299,17 +3467,18 @@ namespace Unity.Rendering
             int numInstances)
         {
             var material = createInfo.RenderMesh.material;
+            var cachedMaterial = material;
 
             if (UseErrorMaterial(ref createInfo))
             {
                 material = m_ErrorMaterial;
 
                 if (material != null)
-                    Debug.LogWarning($"WARNING: Hybrid Renderer using error shader for batch with an erroneous material. Mesh: {createInfo.RenderMesh.mesh}, Material: {createInfo.RenderMesh.material}");
+                    Debug.LogWarning("WARNING: Hybrid Renderer using error shader for batch with an erroneous material: "+cachedMaterial, cachedMaterial);
             }
             else if (!createInfo.Valid)
             {
-                Debug.LogWarning($"WARNING: Hybrid Renderer skipping a batch due to invalid RenderMesh. Mesh: {createInfo.RenderMesh.mesh}, Material: {createInfo.RenderMesh.material}");
+                Debug.LogWarning("WARNING: Hybrid Renderer skipping a batch due to invalid RenderMesh.");
                 return false;
             }
 
@@ -3317,7 +3486,7 @@ namespace Unity.Rendering
             // the error material.
             if (material == null)
             {
-                Debug.LogWarning($"WARNING: Hybrid Renderer skipping a batch due to no valid material. Mesh: {createInfo.RenderMesh.mesh}, Material: {createInfo.RenderMesh.material}");
+                Debug.LogWarning("WARNING: Hybrid Renderer skipping a batch due to no valid material.");
                 return false;
             }
 
@@ -3335,7 +3504,8 @@ namespace Unity.Rendering
                 numInstances,
                 null,
                 createInfo.EditorRenderData.PickableObject,
-                createInfo.EditorRenderData.SceneCullingMask);
+                createInfo.EditorRenderData.SceneCullingMask,
+                renderMesh.layerMask);
             int internalBatchIndex = AddBatchIndex(externalBatchIndex);
 
 #if UNITY_2020_1_OR_NEWER
@@ -3469,7 +3639,13 @@ namespace Unity.Rendering
 
                 HeapBlock allocation = property->GPUAllocation;
                 if (PropertyIsZero(property->OverrideStatus))
+                {
                     allocation = m_SharedZeroAllocation;
+                }
+                else if (property->OverrideStatus == BatchPropertyOverrideStatus.SharedBuiltin)
+                {
+                    allocation.begin = (ulong)property->SharedBuiltinOffset;
+                }
 
                 uint metadataForProperty = PropertyHasPerEntityValues(property->OverrideStatus)
                     ? 0x80000000
@@ -3478,7 +3654,7 @@ namespace Unity.Rendering
                 metadataCbufferStorage[metadataIndex] = (int)metadataForProperty;
 
 #if DEBUG_LOG_PROPERTIES
-                Debug.Log($"Property(internalBatchIndex: {m_ExternalToInternalIds[externalBatchIndex]}, externalBatchIndex: {externalBatchIndex}, property: {i}, elementSize: {property->SizeBytesCPU}, cbuffer: {property->CbufferIndex}, metadataOffset: {property->MetadataOffset}, metadata: {metadataForProperty:x8})");
+                Debug.Log($"Property(internalBatchIndex: {m_ExternalToInternalIds[externalBatchIndex]}, externalBatchIndex: {externalBatchIndex}, property: {i}, elementSize: {property->SizeBytesCPU}, override: {property->OverrideStatus}, cbuffer: {property->CbufferIndex}, metadataOffset: {property->MetadataOffset}, metadata: {metadataForProperty:x8})");
 #endif
             }
 
@@ -3633,15 +3809,19 @@ namespace Unity.Rendering
 
             JobHandle handle = uploadJob.Schedule(m_DefaultValueBlits.Length, 1);
             handle.Complete();
+
+            m_DefaultValueBlits.Clear();
         }
 
         [BurstCompile]
         private struct AABBClearJob : IJobParallelFor
         {
-            [NativeDisableParallelForRestriction] public NativeArray<float> BatchAABBs;
+            [NativeDisableParallelForRestriction] public NativeList<float> BatchAABBs;
             public void Execute(int index)
             {
                 int aabbIndex = (int)(((uint)index) * HybridChunkUpdater.kFloatsPerAABB);
+                Debug.Assert(aabbIndex < BatchAABBs.Length, "AABBIndex is out of BatchAABBs bounds");
+
                 BatchAABBs[aabbIndex + HybridChunkUpdater.kMinX] = float.MaxValue;
                 BatchAABBs[aabbIndex + HybridChunkUpdater.kMinY] = float.MaxValue;
                 BatchAABBs[aabbIndex + HybridChunkUpdater.kMinZ] = float.MaxValue;
@@ -3666,7 +3846,7 @@ namespace Unity.Rendering
             m_AABBsCleared = new AABBClearJob
             {
                 BatchAABBs = m_BatchAABBs,
-            }.Schedule(kMaxBatchCount, 64);
+            }.Schedule(m_ExternalBatchCount, 64);
 
             m_AABBClearKicked = true;
         }
@@ -3735,6 +3915,54 @@ namespace Unity.Rendering
                 PrevUsedSpace = m_GPUPersistentAllocator.UsedSpace;
             }
 #endif
+        }
+
+        internal void ResizeWithMinusOne(NativeList<int> list, int newLength)
+        {
+            Debug.Assert(newLength > 0, "Invalid newLength argument");
+
+            var currentLength = list.Length;
+
+            if (newLength > currentLength)
+            {
+                list.Resize(newLength, NativeArrayOptions.ClearMemory);
+
+                for (int i = currentLength; i < newLength; ++i)
+                {
+                    list[i] = -1;
+                }
+            }
+        }
+
+        static NativeList<T> NewNativeListResized<T>(int length, Allocator allocator, NativeArrayOptions resizeOptions = NativeArrayOptions.ClearMemory) where T : unmanaged
+        {
+            var list = new NativeList<T>(length, allocator);
+            list.Resize(length, resizeOptions);
+
+            return list;
+        }
+
+        private void BlitGlobalAmbientProbe()
+        {
+            if (m_GlobalAmbientProbeDirty)
+            {
+                var probe = m_GlobalAmbientProbe;
+                BlitBytes(m_SharedAmbientProbeAllocation, &probe, UnsafeUtility.SizeOf<SHProperties>());
+                m_GlobalAmbientProbeDirty = false;
+            }
+        }
+
+        internal void UpdateGlobalAmbientProbe(SHProperties globalAmbientProbe)
+        {
+            if (!s_HybridRendererEnabled) return;
+            m_GlobalAmbientProbeDirty = globalAmbientProbe != m_GlobalAmbientProbe;
+#if DEBUG_LOG_AMBIENT_PROBE
+            if (m_GlobalAmbientProbeDirty)
+            {
+                Debug.Log($"Global Ambient probe: {globalAmbientProbe.SHAr} {globalAmbientProbe.SHAg} {globalAmbientProbe.SHAb} {globalAmbientProbe.SHBr} {globalAmbientProbe.SHBg} {globalAmbientProbe.SHBb} {globalAmbientProbe.SHC}");
+            }
+#endif
+            m_GlobalAmbientProbe = globalAmbientProbe;
         }
     }
 }

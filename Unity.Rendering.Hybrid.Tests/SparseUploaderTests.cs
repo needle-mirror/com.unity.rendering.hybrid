@@ -58,7 +58,7 @@ namespace Unity.Rendering.Tests
 #endif
         public void ReplaceBuffer()
         {
-            if (!SystemInfo.supportsComputeShaders)
+            if (!HybridUtils.IsHybridSupportedOnSystem())
             {
                 Assert.Ignore("Skipped due to platform/computer not supporting compute shaders");
                 return;
@@ -91,7 +91,7 @@ namespace Unity.Rendering.Tests
 #endif
         public void NoUploads()
         {
-            if (!SystemInfo.supportsComputeShaders)
+            if (!HybridUtils.IsHybridSupportedOnSystem())
             {
                 Assert.Ignore("Skipped due to platform/computer not supporting compute shaders");
                 return;
@@ -113,7 +113,7 @@ namespace Unity.Rendering.Tests
 #endif
         public void SmallUpload()
         {
-            if (!SystemInfo.supportsComputeShaders)
+            if (!HybridUtils.IsHybridSupportedOnSystem())
             {
                 Assert.Ignore("Skipped due to platform/computer not supporting compute shaders");
                 return;
@@ -146,7 +146,7 @@ namespace Unity.Rendering.Tests
 #endif
         public void BasicUploads()
         {
-            if (!SystemInfo.supportsComputeShaders)
+            if (!HybridUtils.IsHybridSupportedOnSystem())
             {
                 Assert.Ignore("Skipped due to platform/computer not supporting compute shaders");
                 return;
@@ -190,7 +190,7 @@ namespace Unity.Rendering.Tests
 #endif
         public unsafe void BigUploads()
         {
-            if (!SystemInfo.supportsComputeShaders)
+            if (!HybridUtils.IsHybridSupportedOnSystem())
             {
                 Assert.Ignore("Skipped due to platform/computer not supporting compute shaders");
                 return;
@@ -244,7 +244,7 @@ namespace Unity.Rendering.Tests
 #endif
         public void SplatUpload()
         {
-            if (!SystemInfo.supportsComputeShaders)
+            if (!HybridUtils.IsHybridSupportedOnSystem())
             {
                 Assert.Ignore("Skipped due to platform/computer not supporting compute shaders");
                 return;
@@ -286,7 +286,7 @@ namespace Unity.Rendering.Tests
 #endif
         public void UploadFromJobs()
         {
-            if (!SystemInfo.supportsComputeShaders)
+            if (!HybridUtils.IsHybridSupportedOnSystem())
             {
                 Assert.Ignore("Skipped due to platform/computer not supporting compute shaders");
                 return;
@@ -336,7 +336,7 @@ namespace Unity.Rendering.Tests
 #endif
         public unsafe void MatrixUploads4x4()
         {
-            if (!SystemInfo.supportsComputeShaders)
+            if (!HybridUtils.IsHybridSupportedOnSystem())
             {
                 Assert.Ignore("Skipped due to platform/computer not supporting compute shaders");
                 return;
@@ -380,7 +380,7 @@ namespace Unity.Rendering.Tests
 #endif
         public unsafe void MatrixUploads4x4To3x4()
         {
-            if (!SystemInfo.supportsComputeShaders)
+            if (!HybridUtils.IsHybridSupportedOnSystem())
             {
                 Assert.Ignore("Skipped due to platform/computer not supporting compute shaders");
                 return;
@@ -427,7 +427,7 @@ namespace Unity.Rendering.Tests
 #endif
         public unsafe void InverseMatrixUploads4x4()
         {
-            if (!SystemInfo.supportsComputeShaders)
+            if (!HybridUtils.IsHybridSupportedOnSystem())
             {
                 Assert.Ignore("Skipped due to platform/computer not supporting compute shaders");
                 return;
@@ -474,7 +474,7 @@ namespace Unity.Rendering.Tests
 #endif
         public unsafe void InverseMatrixUploads4x4To3x4()
         {
-            if (!SystemInfo.supportsComputeShaders)
+            if (!HybridUtils.IsHybridSupportedOnSystem())
             {
                 Assert.Ignore("Skipped due to platform/computer not supporting compute shaders");
                 return;
@@ -526,7 +526,7 @@ namespace Unity.Rendering.Tests
         {
             const int HugeCount = 100000;
 
-            if (!SystemInfo.supportsComputeShaders)
+            if (!HybridUtils.IsHybridSupportedOnSystem())
             {
                 Assert.Ignore("Skipped due to platform/computer not supporting compute shaders");
                 return;

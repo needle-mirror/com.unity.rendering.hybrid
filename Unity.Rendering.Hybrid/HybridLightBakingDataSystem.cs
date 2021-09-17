@@ -18,9 +18,9 @@ namespace Unity.Rendering
     [ExecuteAlways]
     [AlwaysUpdateSystem]
     [UpdateInGroup(typeof(PresentationSystemGroup))]
-    public partial class HybridLightBakingDataSystem : JobComponentSystem
+    public partial class HybridLightBakingDataSystem : SystemBase
     {
-        protected override JobHandle OnUpdate(JobHandle inputDeps)
+        protected override void OnUpdate()
         {
             Entities
                 .WithStructuralChanges()
@@ -34,8 +34,6 @@ namespace Unity.Rendering
 
                     EntityManager.AddComponent<LightBakingOutputDataRestoredTag>(e);
                 }).Run();
-
-            return inputDeps;
         }
     }
 #endif

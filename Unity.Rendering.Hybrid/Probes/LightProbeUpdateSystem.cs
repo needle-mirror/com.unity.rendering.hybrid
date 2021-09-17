@@ -1,5 +1,3 @@
-#if ENABLE_HYBRID_RENDERER_V2
-
 using System.Collections.Generic;
 using Unity.Burst;
 using Unity.Collections;
@@ -14,15 +12,12 @@ namespace Unity.Rendering
     [UpdateInGroup(typeof(UpdatePresentationSystemGroup))]
     [ExecuteAlways]
     [AlwaysUpdateSystem]
-    class LightProbeUpdateSystem : SystemBase
+    partial class LightProbeUpdateSystem : SystemBase
     {
         EntityQuery m_ProbeGridQuery;
-        EntityQuery m_AmbientProbQuery;
-        SphericalHarmonicsL2 m_LastAmbientProbe;
 
         private ComponentType[] gridQuertyFilter = {ComponentType.ReadOnly<LocalToWorld>(), ComponentType.ReadWrite<BlendProbeTag>()};
         private ComponentType[] gridQuertyFilterForAmbient = { ComponentType.ReadWrite<BlendProbeTag>() };
-        private ComponentType[] ambientQuertyFilter = {ComponentType.ReadWrite<AmbientProbeTag>()};
 
         protected override void OnCreate()
         {
@@ -38,42 +33,34 @@ namespace Unity.Rendering
                 ComponentType.ReadOnly<BlendProbeTag>()
             );
             m_ProbeGridQuery.SetChangedVersionFilter(gridQuertyFilter);
+        }
 
-            m_AmbientProbQuery = GetEntityQuery(
-                ComponentType.ReadOnly<AmbientProbeTag>(),
-                ComponentType.ReadWrite<BuiltinMaterialPropertyUnity_SHAr>(),
-                ComponentType.ReadWrite<BuiltinMaterialPropertyUnity_SHAg>(),
-                ComponentType.ReadWrite<BuiltinMaterialPropertyUnity_SHAb>(),
-                ComponentType.ReadWrite<BuiltinMaterialPropertyUnity_SHBr>(),
-                ComponentType.ReadWrite<BuiltinMaterialPropertyUnity_SHBg>(),
-                ComponentType.ReadWrite<BuiltinMaterialPropertyUnity_SHBb>(),
-                ComponentType.ReadWrite<BuiltinMaterialPropertyUnity_SHC>());
-            m_AmbientProbQuery.SetChangedVersionFilter(ambientQuertyFilter);
+        internal static bool IsValidLightProbeGrid()
+        {
+            var probes = LightmapSettings.lightProbes;
+            bool validGrid = probes != null && probes.count > 0;
+            return validGrid;
         }
 
         protected override void OnUpdate()
         {
-            // if we have valid grid use that...
-            var probes = LightmapSettings.lightProbes;
             var ambientProbe = RenderSettings.ambientProbe;
-            bool validGrid = probes != null && probes.count != 0;
 
-            if (validGrid)
-            { 
+            if (IsValidLightProbeGrid())
+            {
                 UpdateEntitiesFromGrid();
             }
 
-            // update ambients
-            UpdateEntitiesFromAmbientProbe(this, m_AmbientProbQuery, ambientQuertyFilter, ambientProbe, m_LastAmbientProbe);
+            // Update the global ambient probe. If there is no valid grid, BlendProbeTag
+            // entities will have their SH components deleted and will also fall back
+            // to this.
+            UpdateGlobalAmbientProbe(ambientProbe);
+        }
 
-            // if there is no valid grid - instead use ambient probe for all entities
-            if (!validGrid)
-            {
-                m_ProbeGridQuery.SetChangedVersionFilter(gridQuertyFilterForAmbient);
-                UpdateEntitiesFromAmbientProbe(this, m_ProbeGridQuery, gridQuertyFilterForAmbient, ambientProbe, m_LastAmbientProbe);
-            }
-
-            m_LastAmbientProbe = ambientProbe;
+        private void UpdateGlobalAmbientProbe(SphericalHarmonicsL2 ambientProbe)
+        {
+            var hybridRenderer = World.GetExistingSystem<HybridRendererSystem>();
+            hybridRenderer?.UpdateGlobalAmbientProbe(new SHProperties(ambientProbe));
         }
 
         private static void UpdateEntitiesFromAmbientProbe(
@@ -86,7 +73,7 @@ namespace Unity.Rendering
             Profiler.BeginSample("UpdateEntitiesFromAmbientProbe");
             var updateAll = ambientProbe != lastProbe;
             if (updateAll)
-            { 
+            {
                 query.ResetFilter();
             }
 
@@ -208,4 +195,3 @@ namespace Unity.Rendering
         }
     }
 }
-#endif

@@ -5,7 +5,7 @@ using UnityEngine;
 namespace Unity.Rendering
 {
 #if ENABLE_COMPUTE_DEFORMATIONS
-    public abstract class SkinningDeformationSystemBase : SystemBase
+    public abstract partial class SkinningDeformationSystemBase : SystemBase
     {
         static readonly ProfilerMarker k_SkinningDeformationMarker = new ProfilerMarker("SkinningDeformationDispatch");
 

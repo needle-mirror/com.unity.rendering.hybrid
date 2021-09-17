@@ -1,4 +1,4 @@
-#if ENABLE_UNITY_OCCLUSION && ENABLE_HYBRID_RENDERER_V2 && UNITY_2020_2_OR_NEWER && (HDRP_9_0_0_OR_NEWER || URP_9_0_0_OR_NEWER)
+#if ENABLE_UNITY_OCCLUSION && UNITY_2020_2_OR_NEWER && (HDRP_9_0_0_OR_NEWER || URP_9_0_0_OR_NEWER)
 
 using System;
 using Unity.Collections;
@@ -17,7 +17,7 @@ namespace Unity.Rendering.Occlusion
     [AlwaysUpdateSystem]
     [AlwaysSynchronizeSystem]
     [UpdateAfter(typeof(HybridRendererSystem))]
-   unsafe public class OcclusionDebugRenderSystem : JobComponentSystem
+   unsafe public partial class OcclusionDebugRenderSystem : SystemBase
     {
 #if UNITY_MOC_NATIVE_AVAILABLE
 
@@ -198,7 +198,7 @@ namespace Unity.Rendering.Occlusion
             }
         }
 
-        protected override JobHandle OnUpdate(JobHandle inputDeps)
+        protected override void OnUpdate()
         {
             //Reset our total amount based on the previous frame total draw calls
             //Currently there's no way to know how many calls to OnPerformCulling we will have, counting the calls to RenderMOCInstances(...) on the previous frame allow us to get an idea
@@ -209,7 +209,8 @@ namespace Unity.Rendering.Occlusion
             }
 
             m_CurrentOcclusionDraw = 0;
-            return new JobHandle();
+            
+            Dependency = default;
         }
 
         unsafe public void RenderDepthBoundTexture()
@@ -381,7 +382,7 @@ namespace Unity.Rendering.Occlusion
             var OcclusionTest = GetComponentTypeHandle<OcclusionTest>();
             var chunks = m_Occludees.CreateArchetypeChunkArray(Allocator.TempJob);
 
-            
+
 
             for (int i = 0; i < chunks.Length; ++i)
             {
@@ -480,7 +481,7 @@ namespace Unity.Rendering.Occlusion
             chunks.Dispose();
         }
 
-        
+
 
         Mesh GetQuadMesh()
         {

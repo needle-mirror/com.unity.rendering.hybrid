@@ -10,15 +10,11 @@ namespace Unity.Rendering
     /// <summary>
     /// Renders all Entities containing both RenderMesh and LocalToWorld components.
     /// </summary>
-#if ENABLE_HYBRID_RENDERER_V2
     [ExecuteAlways]
     //@TODO: Necessary due to empty component group. When Component group and archetype chunks are unified this should be removed
     [AlwaysUpdateSystem]
     [UpdateInGroup(typeof(StructuralChangePresentationSystemGroup))]
-#else
-    [DisableAutoCreation]
-#endif
-    public class UpdateHybridChunksStructure : SystemBase
+    public partial class UpdateHybridChunksStructure : SystemBase
     {
         private EntityQuery m_MissingHybridChunkInfo;
         private EntityQuery m_DisabledRenderingQuery;

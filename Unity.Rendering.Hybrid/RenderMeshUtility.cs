@@ -1,4 +1,4 @@
-﻿// #define DISABLE_HYBRID_TRANSPARENCY_BATCH_PARTITIONING
+// #define DISABLE_HYBRID_TRANSPARENCY_BATCH_PARTITIONING
 // #define USE_HYBRID_SHARED_COMPONENT_OVERRIDES
 
 #if HDRP_9_0_0_OR_NEWER
@@ -27,8 +27,6 @@ namespace Unity.Rendering
     {
         /// <summary>
         /// The <see cref="Rendering.RenderMesh"/> that will be used by the Hybrid Renderer to render this entity.
-        /// To easily create a <see cref="Rendering.RenderMesh"/> from higher level objects, you can use
-        /// <see cref="RenderMeshUtility.CreateRenderMesh"/>.
         /// </summary>
         public RenderMesh RenderMesh;
 
@@ -41,21 +39,9 @@ namespace Unity.Rendering
         public MotionVectorGenerationMode MotionMode;
 
         /// <summary>
-        /// Which rendering layer the entity lives on.
-        /// Corresponds to <see cref="Renderer.renderingLayerMask"/>.
-        /// </summary>
-        public uint RenderingLayerMask;
-
-        /// <summary>
         /// If this is set to true, the triangle winding will be flipped when rendering.
         /// </summary>
         public bool FlipWinding;
-
-        /// <summary>
-        /// Determines what kinds of light probes the entity will use, if any.
-        /// Corresponds to <see cref="Renderer.lightProbeUsage"/>.
-        /// </summary>
-        public LightProbeUsage LightProbeUsage;
 
         /// <summary>
         /// Construct a <see cref="RenderMeshDescription"/> using defaults from the given
@@ -98,21 +84,14 @@ namespace Unity.Rendering
                 material = sharedMaterials[subMeshIndex],
                 subMesh = subMeshIndex,
                 layer = renderer.gameObject.layer,
+                layerMask = renderer.renderingLayerMask,
                 castShadows = renderer.shadowCastingMode,
                 receiveShadows = renderer.receiveShadows,
                 needMotionVectorPass = needMotionVectorPass,
             };
 
-            RenderingLayerMask = renderer.renderingLayerMask;
             FlipWinding = false;
             MotionMode = motionVectorGenerationMode;
-
-            var staticLightingMode = RenderMeshUtility.StaticLightingModeFromRenderer(renderer);
-            var lightProbeUsage = renderer.lightProbeUsage;
-
-            LightProbeUsage = (staticLightingMode == StaticLightingMode.LightProbes)
-                ? lightProbeUsage
-                : LightProbeUsage.Off;
         }
 
         /// <summary>
@@ -126,8 +105,7 @@ namespace Unity.Rendering
             MotionVectorGenerationMode motionVectorGenerationMode = MotionVectorGenerationMode.Camera,
             int layer = 0,
             int subMeshIndex = 0,
-            uint renderingLayerMask = 1,
-            LightProbeUsage lightProbeUsage = LightProbeUsage.Off)
+            uint renderingLayerMask = 0xffffffff)
         {
             Debug.Assert(material != null, "Must have a non-null Material to create RenderMeshDescription.");
             Debug.Assert(mesh != null, "Must have a non-null Mesh to create RenderMeshDescription.");
@@ -142,15 +120,14 @@ namespace Unity.Rendering
                 material = material,
                 subMesh = subMeshIndex,
                 layer = layer,
+                layerMask = renderingLayerMask,
                 castShadows = shadowCastingMode,
                 receiveShadows = receiveShadows,
                 needMotionVectorPass = needMotionVectorPass,
             };
 
-            RenderingLayerMask = renderingLayerMask;
             FlipWinding = false;
             MotionMode = motionVectorGenerationMode;
-            LightProbeUsage = lightProbeUsage;
         }
 
         /// <summary>
@@ -170,30 +147,23 @@ namespace Unity.Rendering
 
             if (RenderMesh.mesh == null)
             {
-                Debug.LogWarning($"RenderMesh must have a valid non-null Mesh. Mesh: {RenderMesh.mesh}, Material: {RenderMesh.material}");
+                Debug.LogWarning("RenderMesh must have a valid non-null Mesh.");
                 valid = false;
             }
             else if (RenderMesh.subMesh < 0 || RenderMesh.subMesh >= RenderMesh.mesh.subMeshCount)
             {
-                Debug.LogWarning($"RenderMesh subMesh index out of bounds. Mesh: {RenderMesh.mesh}, Material: {RenderMesh.material}");
+                Debug.LogWarning("RenderMesh subMesh index out of bounds.");
                 valid = false;
             }
 
             if (RenderMesh.material == null)
             {
-                Debug.LogWarning($"RenderMesh must have a valid non-null Material. Mesh: {RenderMesh.mesh}, Material: {RenderMesh.material}");
+                Debug.LogWarning("RenderMesh must have a valid non-null Material.");
                 valid = false;
             }
 
             return valid;
         }
-    }
-
-    internal enum StaticLightingMode
-    {
-        None = 0,
-        LightMapped = 1,
-        LightProbes = 2,
     }
 
     /// <summary>
@@ -215,7 +185,6 @@ namespace Unity.Rendering
             return new float4(hasLastPositionStream, forceNoMotion, s_bias, cameraVelocity);
         }
 
-#if ENABLE_HYBRID_RENDERER_V2
         private static ComponentTypes kHybridComponentsNoMotion = new ComponentTypes(new ComponentType[]
         {
             // Absolute minimum set of components required by Hybrid Renderer
@@ -247,10 +216,6 @@ namespace Unity.Rendering
             // Can be empty if disabled.
 #if USE_HYBRID_BUILTIN_LIGHTDATA
             ComponentType.ReadWrite<BuiltinMaterialPropertyUnity_LightData>(),
-#endif
-
-#if URP_9_0_0_OR_NEWER
-            ComponentType.ReadWrite<BuiltinMaterialPropertyUnity_SpecCube0_HDR>(),
 #endif
         });
 
@@ -295,23 +260,7 @@ namespace Unity.Rendering
             ComponentType.ReadWrite<BuiltinMaterialPropertyUnity_MotionVectorsParams>(),
 #endif
 #endif
-
-#if URP_9_0_0_OR_NEWER
-            ComponentType.ReadWrite<BuiltinMaterialPropertyUnity_SpecCube0_HDR>(),
-#endif
         });
-
-#else
-        private static ComponentTypes kHybridV1Components = new ComponentTypes(new ComponentType[]
-        {
-            ComponentType.ReadWrite<WorldRenderBounds>(),
-            ComponentType.ReadWrite<LocalToWorld>(),
-            ComponentType.ReadWrite<RenderMesh>(),
-            ComponentType.ChunkComponent<ChunkWorldRenderBounds>(),
-            ComponentType.ReadWrite<RenderBounds>(),
-            ComponentType.ReadWrite<PerInstanceCullingTag>(),
-        });
-#endif
 
         // Use a boolean constant for guarding most of the code so both ifdef branches are
         // always compiled.
@@ -351,7 +300,6 @@ namespace Unity.Rendering
         ///         Mesh,
         ///         Material);
         ///
-        ///     var renderMesh = RenderMeshUtility.CreateRenderMesh(Mesh, Material);
         ///     // RenderMeshUtility can be used to easily create Hybrid Renderer
         ///     // compatible entities, but it can only be called from the main thread.
         ///     var entity = entityManager.CreateEntity();
@@ -380,16 +328,16 @@ namespace Unity.Rendering
             if (!renderMeshDescription.IsValid())
                 return;
 #endif
+            // Entities with Static are never rendered with motion vectors
+            bool inMotionPass = kUseHybridMotionPass &&
+                                renderMeshDescription.IsInMotionPass &&
+                                !entityManager.HasComponent<Static>(entity);
 
             // Add all components up front using as few calls as possible.
-#if ENABLE_HYBRID_RENDERER_V2
-            if (renderMeshDescription.IsInMotionPass && kUseHybridMotionPass)
+            if (inMotionPass)
                 entityManager.AddComponents(entity, kHybridComponentsWithMotion);
             else
                 entityManager.AddComponents(entity, kHybridComponentsNoMotion);
-#else
-            entityManager.AddComponents(entity, kHybridV1Components);
-#endif
 
             if (renderMeshDescription.FlipWinding)
                 entityManager.AddComponent(entity, ComponentType.ReadWrite<RenderMeshFlippedWindingTag>());
@@ -400,9 +348,8 @@ namespace Unity.Rendering
             var localBounds = renderMesh.mesh.bounds.ToAABB();
             entityManager.SetComponentData(entity, new RenderBounds { Value = localBounds });
 
-#if ENABLE_HYBRID_RENDERER_V2
             // HDRP previous frame matrices (for motion vectors)
-            if (renderMeshDescription.IsInMotionPass && kUseHybridMotionPass)
+            if (inMotionPass)
             {
                 if (kUseSharedComponentOverrides)
                 {
@@ -426,7 +373,7 @@ namespace Unity.Rendering
             {
                 entityManager.SetSharedComponentData(entity, new BuiltinMaterialPropertyUnity_RenderingLayer_Shared
                 {
-                    Value = new uint4(renderMeshDescription.RenderingLayerMask, 0, 0, 0)
+                    Value = new uint4(renderMesh.layerMask, 0, 0, 0)
                 });
 
                 entityManager.SetSharedComponentData(entity,
@@ -441,7 +388,7 @@ namespace Unity.Rendering
             {
                 entityManager.SetComponentData(entity, new BuiltinMaterialPropertyUnity_RenderingLayer
                 {
-                    Value = new uint4(renderMeshDescription.RenderingLayerMask, 0, 0, 0)
+                    Value = new uint4(renderMesh.layerMask, 0, 0, 0)
                 });
 
                 entityManager.SetComponentData(entity, new BuiltinMaterialPropertyUnity_WorldTransformParams
@@ -464,9 +411,6 @@ namespace Unity.Rendering
 #if !DISABLE_HYBRID_TRANSPARENCY_BATCH_PARTITIONING
             PartitionTransparentObjects(entity, entityManager, renderMeshDescription.RenderMesh);
 #endif
-
-            AddLightProbeComponents(entity, entityManager, renderMeshDescription);
-#endif
         }
 
         /// <summary>
@@ -486,7 +430,6 @@ namespace Unity.Rendering
         ///         Mesh,
         ///         Material);
         ///
-        ///     var renderMesh = RenderMeshUtility.CreateRenderMesh(Mesh, Material);
         ///     // RenderMeshUtility can be used to easily create Hybrid Renderer
         ///     // compatible entities, but it can only be called from the main thread.
         ///     var entity = entityManager.CreateEntity();
@@ -518,14 +461,14 @@ namespace Unity.Rendering
 
             // NOTE: Keep this in sync with the AddHybridComponentsToEntity EntityManager version
             // Add all components up front using as few calls as possible.
-#if ENABLE_HYBRID_RENDERER_V2
+
+            // NOTE: Can not check for Static component here, unlike the EntityManager version.
+            // ECB can only set components, not check for them.
+
             if (renderMeshDescription.IsInMotionPass && kUseHybridMotionPass)
                 ecb.AddComponent(entity, kHybridComponentsWithMotion);
             else
                 ecb.AddComponent(entity, kHybridComponentsNoMotion);
-#else
-            ecb.AddComponent(entity, kHybridV1Components);
-#endif
 
             if (renderMeshDescription.FlipWinding)
                 ecb.AddComponent(entity, ComponentType.ReadWrite<RenderMeshFlippedWindingTag>());
@@ -536,7 +479,6 @@ namespace Unity.Rendering
             var localBounds = renderMesh.mesh.bounds.ToAABB();
             ecb.SetComponent(entity, new RenderBounds { Value = localBounds });
 
-#if ENABLE_HYBRID_RENDERER_V2
             // HDRP previous frame matrices (for motion vectors)
             if (renderMeshDescription.IsInMotionPass && kUseHybridMotionPass)
             {
@@ -562,7 +504,7 @@ namespace Unity.Rendering
             {
                 ecb.SetSharedComponent(entity, new BuiltinMaterialPropertyUnity_RenderingLayer_Shared
                 {
-                    Value = new uint4(renderMeshDescription.RenderingLayerMask, 0, 0, 0)
+                    Value = new uint4(renderMesh.layerMask, 0, 0, 0)
                 });
 
                 ecb.SetSharedComponent(entity,
@@ -577,7 +519,7 @@ namespace Unity.Rendering
             {
                 ecb.SetComponent(entity, new BuiltinMaterialPropertyUnity_RenderingLayer
                 {
-                    Value = new uint4(renderMeshDescription.RenderingLayerMask, 0, 0, 0)
+                    Value = new uint4(renderMesh.layerMask, 0, 0, 0)
                 });
 
                 ecb.SetComponent(entity, new BuiltinMaterialPropertyUnity_WorldTransformParams
@@ -596,9 +538,6 @@ namespace Unity.Rendering
                     Value = new float4(0, 0, 1, 0)
                 });
             }
-
-            AddLightProbeComponents(entity, ecb, renderMeshDescription);
-#endif
         }
 #pragma warning restore CS0162
 
@@ -626,44 +565,6 @@ namespace Unity.Rendering
                     PartitionValue = (ulong) transparentPartitionValue.x |
                                      ((ulong) transparentPartitionValue.y << 32),
                 });
-            }
-        }
-
-        private static void AddLightProbeComponents(
-            Entity entity,
-            EntityManager entityManager,
-            in RenderMeshDescription renderMeshDescription)
-        {
-            switch (renderMeshDescription.LightProbeUsage)
-            {
-                default:
-                    entityManager.AddComponent<AmbientProbeTag>(entity);
-                    break;
-                case LightProbeUsage.BlendProbes:
-                    entityManager.AddComponent<BlendProbeTag>(entity);
-                    break;
-                case LightProbeUsage.CustomProvided:
-                    entityManager.AddComponent<CustomProbeTag>(entity);
-                    break;
-            }
-        }
-
-        private static void AddLightProbeComponents(
-            Entity entity,
-            EntityCommandBuffer ecb,
-            in RenderMeshDescription renderMeshDescription)
-        {
-            switch (renderMeshDescription.LightProbeUsage)
-            {
-                default:
-                    ecb.AddComponent<AmbientProbeTag>(entity);
-                    break;
-                case LightProbeUsage.BlendProbes:
-                    ecb.AddComponent<BlendProbeTag>(entity);
-                    break;
-                case LightProbeUsage.CustomProvided:
-                    ecb.AddComponent<CustomProbeTag>(entity);
-                    break;
             }
         }
 
@@ -696,17 +597,6 @@ namespace Unity.Rendering
 #else
             return false;
 #endif
-        }
-
-        internal static StaticLightingMode StaticLightingModeFromRenderer(Renderer renderer)
-        {
-            var staticLightingMode = StaticLightingMode.None;
-            if (renderer.lightmapIndex >= 65534 || renderer.lightmapIndex < 0)
-                staticLightingMode = StaticLightingMode.LightProbes;
-            else if (renderer.lightmapIndex >= 0)
-                staticLightingMode = StaticLightingMode.LightMapped;
-
-            return staticLightingMode;
         }
     }
 }

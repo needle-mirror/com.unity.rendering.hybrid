@@ -300,15 +300,15 @@ namespace Unity.Rendering
 
         private unsafe struct BlocksOfSize : IDisposable
         {
-            private UnsafeList *m_Blocks;
+            private UnsafeList<HeapBlock>* m_Blocks;
 
             public BlocksOfSize(int dummy)
             {
-                m_Blocks = (UnsafeList*)Memory.Unmanaged.Allocate(
-                    UnsafeUtility.SizeOf<UnsafeList>(),
-                    UnsafeUtility.AlignOf<UnsafeList>(),
+                m_Blocks = (UnsafeList<HeapBlock>*)Memory.Unmanaged.Allocate(
+                    UnsafeUtility.SizeOf<UnsafeList<HeapBlock>>(),
+                    UnsafeUtility.AlignOf<UnsafeList<HeapBlock>>(),
                     Allocator.Persistent);
-                UnsafeUtility.MemClear(m_Blocks, UnsafeUtility.SizeOf<UnsafeList>());
+                UnsafeUtility.MemClear(m_Blocks, UnsafeUtility.SizeOf<UnsafeList<HeapBlock>>());
                 m_Blocks->Allocator = Allocator.Persistent;
             }
 
@@ -329,7 +329,7 @@ namespace Unity.Rendering
                     return new HeapBlock();
 
                 HeapBlock block = Block(len - 1);
-                m_Blocks->Resize<HeapBlock>(len - 1);
+                m_Blocks->Resize(len - 1);
                 return block;
             }
 
@@ -339,7 +339,7 @@ namespace Unity.Rendering
                 {
                     if (block.CompareTo(Block(i)) == 0)
                     {
-                        m_Blocks->RemoveAtSwapBack<HeapBlock>(i);
+                        m_Blocks->RemoveAtSwapBack(i);
                         return true;
                     }
                 }

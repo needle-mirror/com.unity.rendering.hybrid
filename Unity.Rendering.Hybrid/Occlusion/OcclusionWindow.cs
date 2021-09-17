@@ -1,4 +1,4 @@
-#if UNITY_EDITOR && ENABLE_UNITY_OCCLUSION && ENABLE_HYBRID_RENDERER_V2 && UNITY_2020_2_OR_NEWER && (HDRP_9_0_0_OR_NEWER || URP_9_0_0_OR_NEWER)
+#if UNITY_EDITOR && ENABLE_UNITY_OCCLUSION && UNITY_2020_2_OR_NEWER && (HDRP_9_0_0_OR_NEWER || URP_9_0_0_OR_NEWER)
 
 using System.Linq;
 using UnityEditor;
@@ -201,7 +201,7 @@ public class OcclusionWindow : EditorWindow
 
         if(OcclusionDebugRenderSystem.DebugRenderMode.Depth == debugSystem.m_DebugRenderMode || OcclusionDebugRenderSystem.DebugRenderMode.Test == debugSystem.m_DebugRenderMode)
         {
-            debugSystem.WantedOcclusionDraw = EditorGUILayout.IntSlider(debugSystem.WantedOcclusionDraw, 1, debugSystem.TotalOcclusionDrawPerFrame);            
+            debugSystem.WantedOcclusionDraw = EditorGUILayout.IntSlider(debugSystem.WantedOcclusionDraw, 1, debugSystem.TotalOcclusionDrawPerFrame);
         }
 
 

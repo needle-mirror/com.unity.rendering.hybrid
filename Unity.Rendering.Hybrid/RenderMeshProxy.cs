@@ -71,6 +71,8 @@ namespace Unity.Rendering
         public bool receiveShadows;
 
         public bool needMotionVectorPass;
+        
+        public uint layerMask;
 
         /// <summary>
         /// Two RenderMesh objects are equal if their respective property values are equal.
@@ -84,6 +86,7 @@ namespace Unity.Rendering
                 material == other.material &&
                 subMesh == other.subMesh &&
                 layer == other.layer &&
+                layerMask == other.layerMask &&
                 castShadows == other.castShadows &&
                 receiveShadows == other.receiveShadows &&
                 needMotionVectorPass == other.needMotionVectorPass;
@@ -108,6 +111,7 @@ namespace Unity.Rendering
                     ReferenceEquals(material, null) ? 0 : material.GetHashCode(),
                     subMesh.GetHashCode(),
                     layer.GetHashCode(),
+                    layerMask.GetHashCode(),
                     castShadows.GetHashCode(),
                     flags
                 };

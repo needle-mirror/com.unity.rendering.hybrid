@@ -1,4 +1,61 @@
-# Change log
+# Changelog
+
+## [0.50.0] - 2021-09-17
+
+### Added
+
+* Hybrid Renderer is automatically disabled when required support is not present or -nographics is given on the command line.
+
+### Removed
+
+* Hybrid Renderer V1 is now removed. V2 is the default renderer
+
+### Fixed
+
+* Fixed memory leak on frames where no data uploading happened.
+* `HybridRendererSystem` was not correctly tracking all its component read/write dependencies.
+* Warning about erroneous materials did not have enough information to act on them.
+
+## [0.13.0] - 2021-03-15
+
+### Removed
+
+* Removed an unused internal struct that could cause compiler warnings.
+
+### Fixed
+
+* Entities that use the ambient light probe now have no SH components and use much less memory.
+* Fixed a bug where global ambient probes were not always rendered correctly.
+
+## [0.12.0] - 2021-01-26
+
+### Added
+
+* `CountNewChunksJob`, which is responsible for counting the number of new chunks since last frame, and filling the `newChunks` array.
+* New #define DISABLE_HYBRID_LIGHT_PROBES to disable light probes globally to save memory.
+
+### Changed
+
+* (Root)LodRequirement component split to (Root)LodRange and (Root)LodWorldReferencePoint. The LOD ranges are created during conversion and the world reference point gets recalculated every frame. Splitting them allows performance optimizations.
+* LODGroupWorldReferencePoint component added to LOD/HLOD groups. Allows us to transform the LOD pivot point once per group and storing it instead of doing repeated work per leaf entity. Total LODRequirementSystem performance increase up to 2x (when combined with the optimization above).
+* Cache `GetComponentTypeHandle<>()` calls instead of doing them for each jobs.
+* `UpdateAllHybridChunksJob` does not count the number of new chunks since last frame anymore.
+* No longer track shader reflection version changes in `HybridRendererSystem`. A new system is now taking care of that in the `StructuralChangePresentationSystemGroup`
+* No longer add/remove chunks in the `HybridRendererSystem`. A new system is now taking care of that in the `StructuralChangePresentationSystemGroup`
+* Update minimum editor version to 2020.2.1f1-dots.3
+*Loaded the Samples project in a 2020.2.1f1-dots.3 editor without any issues or console errors.
+*Ran `Full CI [Entities] [project version]`
+
+### Fixed
+
+* LOD bitfield becoming stale when entities get removed or LOD components modified using LiveLink incremental update
+* Fixed edge case bug in instance GPU allocation behavior.
+* Improved GameObject conversion of light mapped objects during incremental conversion.
+* Fixed a performance regression related to ambient probe update when probe grid was not available
+* Do not perform structural changes in the `HybridRendererSystem` anymore.
+* Static objects now always have per-object motion vectors disabled, regardless of MeshRenderer settings.
+
+
 
 ## [0.11.0] - 2020-11-13
 

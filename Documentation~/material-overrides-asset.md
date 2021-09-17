@@ -1,24 +1,17 @@
 uid: material-overrides-howto
 
-# Material overrides
+# Material overrides using the Material Override Asset
 
-In Hybrid Renderer V2, you can override material properties without writing any code. This document describes the process on how to setup property overrides for a material.
+In Hybrid Renderer V2, you can override material properties without writing any code. This document describes the process on how to setup Material overrides for a material without writing any code. For more information on Material overrides, see [Material overrides](material-overrides.md).
 
-## Sample scenes
-
-Hybrid Renderer provides sample scenes to show you material overrides using both the Universal Render Pipeline (URP) and the High Definition Render Pipeline (HDRP).
-
-The paths to the per-render pipeline sample scenes are as follows:
-
-* **HDRP**: **HybridHDRPSamples > SampleScenes > MaterialOverridesSample**
-* **URP**: **HybridURPSamples > SampleScenes > MaterialOverridesSample**
-
-## Setting up material overrides
+## Setting up Material overrides
 
 This section explains how to set up overrides for a material.
 
 1. Select the material you want to override. If one does not exists, create a new one (menu: **Assets > Create > Material**) and select it. 
-2. If the material uses a Shader Graph, make sure to enable **Exposed** and **Hybrid Instanced (experimental)** for properties you want to override. This property is in the **Node Settings** tab of the **Graph Inspector**. Note that Hybrid Renderer currently only supports Vector1, Vector4, and Color types for overrides.<br/>![](images/HybridInstancingProperty.png)
+2. If the material uses a Shader Graph, make sure to enable **Exposed** and make it hybrid instanced. The method to do this changes depending on the Unity version:
+   * Unity 2020.1: enable **Hybrid Instanced (experimental)**<br/>![](images/HybridInstancingProperty.png)
+   * From Unity 2020.2: Enable **Override Property Declaration** then set **Shader Declaration** to **Hybrid Per Instance**.<br/>![](images/HybridInstancingProperty2020-2.png)
 3. Create a new Material Override Asset (menu: **Assets > Create > Shader > Material Override Asset**) and select it.
 4. In the Inspector, add your material to the **Material** property.<br/>![](images/MaterialOverrideMaterialSelect.png)
 5. Click **Add Property Override** and select the properties you want this asset to override. Note that, if the  material uses custom properties from a Shader Graph, you may have to wait for an asset data refresh and import to happen after you select the properties. When you add the property overrides, Unity creates a C# script next to your material in the Project window. Do not touch this file.<br/>![](images/MaterialOverridePropertySelect.png)

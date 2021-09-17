@@ -14,23 +14,14 @@ using UnityEngine;
 
 namespace Unity.Rendering
 {
-    internal struct HasShaderReflectionChanged : IComponentData
-    {
-        public bool Value;
-    }
-
     /// <summary>
     /// Renders all Entities containing both RenderMesh and LocalToWorld components.
     /// </summary>
-#if ENABLE_HYBRID_RENDERER_V2
     [ExecuteAlways]
     //@TODO: Necessary due to empty component group. When Component group and archetype chunks are unified this should be removed
     [AlwaysUpdateSystem]
     [UpdateInGroup(typeof(StructuralChangePresentationSystemGroup))]
-#else
-    [DisableAutoCreation]
-#endif
-    public class TrackShaderReflectionChangesSystem : SystemBase
+    public partial class TrackShaderReflectionChangesSystem : SystemBase
     {
         private uint m_PreviousDOTSReflectionVersionNumber = 0;
         private bool m_IsFirstFrame;

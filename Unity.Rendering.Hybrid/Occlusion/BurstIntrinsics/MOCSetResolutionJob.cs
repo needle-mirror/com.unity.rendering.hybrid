@@ -1,4 +1,4 @@
-#if ENABLE_UNITY_OCCLUSION && ENABLE_HYBRID_RENDERER_V2 && UNITY_2020_2_OR_NEWER && (HDRP_9_0_0_OR_NEWER || URP_9_0_0_OR_NEWER)
+#if ENABLE_UNITY_OCCLUSION && UNITY_2020_2_OR_NEWER && (HDRP_9_0_0_OR_NEWER || URP_9_0_0_OR_NEWER)
 
 using System;
 using Unity.Burst;
@@ -38,7 +38,7 @@ namespace Unity.Rendering.Occlusion
             MOC.BurstIntrinsics* mocBurstIntrinsic = (MOC.BurstIntrinsics*)mocBurstIntrinsicPtrArray[index];
 
             mocBurstIntrinsic->GetResolution(out currentDepthWidth, out currentDepthHeight);
-            
+
             if (currentDepthWidth != (uint)wantedDepthWidth
                 || currentDepthHeight != (uint)wantedDepthHeight)
             {
@@ -53,7 +53,7 @@ namespace Unity.Rendering.Occlusion
                 mocBurstIntrinsic->SetNearClipPlane(wantedNearClipValue);
             }
 
-            
+
         }
     }
 }

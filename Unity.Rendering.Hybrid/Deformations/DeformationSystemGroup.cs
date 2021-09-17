@@ -5,11 +5,7 @@ namespace Unity.Rendering
 {
     [UnityEngine.ExecuteAlways]
     [UpdateInGroup(typeof(PresentationSystemGroup))]
-#if ENABLE_HYBRID_RENDERER_V2
     [UpdateBefore(typeof(HybridRendererSystem))]
-#else
-    [UpdateBefore(typeof(RenderMeshSystemV2))]
-#endif
     public class DeformationsInPresentation : ComponentSystemGroup
     {
         protected override void OnCreate()
@@ -27,7 +23,7 @@ namespace Unity.Rendering
 
     [UnityEngine.ExecuteAlways]
     [UpdateInGroup(typeof(DeformationsInPresentation))]
-    public class PushMeshDataSystem : PushMeshDataSystemBase { }
+    public partial class PushMeshDataSystem : PushMeshDataSystemBase { }
 
     [UnityEngine.ExecuteAlways]
     [UpdateInGroup(typeof(DeformationsInPresentation))]
@@ -40,7 +36,7 @@ namespace Unity.Rendering
 #if ENABLE_COMPUTE_DEFORMATIONS
     [UpdateBefore(typeof(SkinningDeformationSystem))]
 #endif
-    public class FinalizePushSkinMatrixSystem : FinalizePushSkinMatrixSystemBase
+    public partial class FinalizePushSkinMatrixSystem : FinalizePushSkinMatrixSystemBase
     {
         protected override PrepareSkinMatrixSystemBase PrepareSkinMatrixSystem =>
             World.GetExistingSystem<PrepareSkinMatrixSystem>();
@@ -51,12 +47,12 @@ namespace Unity.Rendering
     [UpdateInGroup(typeof(DeformationsInPresentation))]
     [UpdateAfter(typeof(PushMeshDataSystem))]
     [UpdateBefore(typeof(FinalizePushBlendWeightSystem))]
-    public class PrepareBlendWeightSystem : PrepareBlendWeightSystemBase { }
+    public partial class PrepareBlendWeightSystem : PrepareBlendWeightSystemBase { }
 
     [UnityEngine.ExecuteAlways]
     [UpdateInGroup(typeof(DeformationsInPresentation))]
     [UpdateBefore(typeof(BlendShapeDeformationSystem))]
-    public class FinalizePushBlendWeightSystem : FinalizePushBlendWeightSystemBase
+    public partial class FinalizePushBlendWeightSystem : FinalizePushBlendWeightSystemBase
     {
         protected override PrepareBlendWeightSystemBase PrepareBlendShapeSystem =>
             World.GetExistingSystem<PrepareBlendWeightSystem>();
@@ -65,16 +61,16 @@ namespace Unity.Rendering
     [UnityEngine.ExecuteAlways]
     [UpdateInGroup(typeof(DeformationsInPresentation))]
     [UpdateAfter(typeof(PushMeshDataSystem))]
-    public class InstantiateDeformationSystem : InstantiateDeformationSystemBase { }
+    public partial class InstantiateDeformationSystem : InstantiateDeformationSystemBase { }
 
     [UnityEngine.ExecuteAlways]
     [UpdateInGroup(typeof(DeformationsInPresentation))]
     [UpdateAfter(typeof(InstantiateDeformationSystem))]
-    public class BlendShapeDeformationSystem : BlendShapeDeformationSystemBase { }
+    public partial class BlendShapeDeformationSystem : BlendShapeDeformationSystemBase { }
 
     [UnityEngine.ExecuteAlways]
     [UpdateInGroup(typeof(DeformationsInPresentation))]
     [UpdateAfter(typeof(BlendShapeDeformationSystem))]
-    public class SkinningDeformationSystem : SkinningDeformationSystemBase { }
+    public partial class SkinningDeformationSystem : SkinningDeformationSystemBase { }
 #endif
 }

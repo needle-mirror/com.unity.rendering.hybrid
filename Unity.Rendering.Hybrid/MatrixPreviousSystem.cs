@@ -9,16 +9,12 @@ using UnityEngine;
 
 namespace Unity.Rendering
 {
-#if ENABLE_HYBRID_RENDERER_V2
     [ExecuteAlways]
     //@TODO: Necessary due to empty component group. When Component group and archetype chunks are unified this should be removed
     [AlwaysUpdateSystem]
     [UpdateInGroup(typeof(PresentationSystemGroup))]
     [UpdateAfter(typeof(HybridRendererSystem))]
-#else
-    [DisableAutoCreation]
-#endif
-    public class MatrixPreviousSystem : JobComponentSystem
+    public partial class MatrixPreviousSystem : SystemBase
     {
         private EntityQuery m_GroupPrev;
 
@@ -59,15 +55,18 @@ namespace Unity.Rendering
             });
         }
 
-        protected override JobHandle OnUpdate(JobHandle inputDeps)
+        protected override void OnUpdate()
         {
+            if (!HybridRendererSystem.HybridRendererEnabled)
+                return;
+
             var updateMatrixPreviousJob = new UpdateMatrixPrevious
             {
                 LocalToWorldTypeHandle = GetComponentTypeHandle<LocalToWorld>(true),
                 MatrixPreviousTypeHandle = GetComponentTypeHandle<BuiltinMaterialPropertyUnity_MatrixPreviousM>(),
                 LastSystemVersion = LastSystemVersion
             };
-            return updateMatrixPreviousJob.Schedule(m_GroupPrev, inputDeps);
+            Dependency = updateMatrixPreviousJob.Schedule(m_GroupPrev, Dependency);
         }
     }
 }

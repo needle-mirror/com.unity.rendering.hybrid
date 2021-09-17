@@ -19,7 +19,6 @@ namespace Unity.Rendering
         }
 
 #if UNITY_EDITOR
-#if ENABLE_HYBRID_RENDERER_V2
         [MenuItem("DOTS/Hybrid Renderer/Reupload all instance data")]
         internal static void ReuploadAllInstanceData()
         {
@@ -32,7 +31,6 @@ namespace Unity.Rendering
             s_HybridDebugSettings.RecreateAllBatches = true;
         }
 
-#endif
         internal static void EndFrame()
         {
             s_HybridDebugSettings = default;

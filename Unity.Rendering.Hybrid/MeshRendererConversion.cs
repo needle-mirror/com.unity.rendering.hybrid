@@ -11,7 +11,7 @@ namespace Unity.Rendering
     {
         // Hold a persistent light map conversion context so previously encountered light maps
         // can be reused across multiple conversion batches, which is especially important
-        // for incremental conversion (LiveLink).
+        // for incremental conversion (LiveConversion).
         private LightMapConversionContext m_LightMapConversionContext;
 
         protected override void OnCreate()

@@ -1,8 +1,6 @@
 #pragma kernel CopyKernel
 #pragma kernel ReplaceKernel
 
-static const float kEpsilon = 0.000001f;
-
 static const uint kOperationType_Upload = 0;
 static const uint kOperationType_Matrix_4x4 = 1;
 static const uint kOperationType_Matrix_Inverse_4x4 = 2;
@@ -111,7 +109,7 @@ float3x3 inverse3x3(float3x3 m)
 {
     float3 c0 = m._m00_m10_m20;
     float3 c1 = m._m01_m11_m21;
-    float3 c2 = m._m02_m12_m22; 
+    float3 c2 = m._m02_m12_m22;
 
     float3 t0 = float3(c1.x, c2.x, c0.x);
     float3 t1 = float3(c1.y, c2.y, c0.y);
@@ -121,19 +119,8 @@ float3x3 inverse3x3(float3x3 m)
     float3 m1 = t0.yzx * t2 - t0 * t2.yzx;
     float3 m2 = t0 * t1.yzx - t0.yzx * t1;
 
-    float det = csum(t0.zxy * m0);
-
-    if (abs(det) < kEpsilon)
-    {
-        return float3x3(
-            1.0f, 0.0f, 0.0f,
-            0.0f, 1.0f, 0.0f,
-            0.0f, 0.0f, 1.0f);
-    }
-    else
-    {
-        return float3x3(m0, m1, m2) * rcp(det);
-    }
+    float rcpDet = 1.0f / csum(t0.zxy * m0);
+    return float3x3(m0, m1, m2) * rcpDet;
 }
 
 float3x4 inverseAffine(float3x4 m)

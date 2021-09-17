@@ -17,7 +17,7 @@ namespace Unity.Rendering
 {
 #if !TINY_0_22_0_OR_NEWER
 
-    [ConverterVersion("sebbi", 1)]
+    [ConverterVersion("sebbi", 3)]
     [WorldSystemFilter(WorldSystemFilterFlags.HybridGameObjectConversion)]
     class HybridEntitiesConversion : GameObjectConversionSystem
     {
@@ -31,8 +31,8 @@ namespace Unity.Rendering
         {
             Entities.ForEach((Light light) =>
             {
-                AddHybridComponent(light);
                 var entity = GetPrimaryEntity(light);
+                DstEntityManager.AddComponentObject(entity, light);
                 ConfigureEditorRenderData(entity, light.gameObject, true);
 
 #if UNITY_2020_2_OR_NEWER && UNITY_EDITOR
@@ -45,61 +45,68 @@ namespace Unity.Rendering
 
             Entities.ForEach((LightProbeProxyVolume group) =>
             {
-                AddHybridComponent(group);
+                DstEntityManager.AddComponentObject(GetPrimaryEntity(group), group);
             });
 
             Entities.ForEach((ReflectionProbe probe) =>
             {
-                AddHybridComponent(probe);
+                DstEntityManager.AddComponentObject(GetPrimaryEntity(probe), probe);
             });
 
             Entities.ForEach((TextMesh mesh, MeshRenderer renderer) =>
             {
-                AddHybridComponent(mesh);
-                AddHybridComponent(renderer);
+                var entity = GetPrimaryEntity(mesh);
+                DstEntityManager.AddComponentObject(entity, mesh);
+                DstEntityManager.AddComponentObject(entity, renderer);
             });
 
             Entities.ForEach((SpriteRenderer sprite) =>
             {
-                AddHybridComponent(sprite);
+                DstEntityManager.AddComponentObject(GetPrimaryEntity(sprite), sprite);
             });
 
             Entities.ForEach((VisualEffect vfx) =>
             {
-                AddHybridComponent(vfx);
+                DstEntityManager.AddComponentObject(GetPrimaryEntity(vfx), vfx);
             });
 
             Entities.ForEach((ParticleSystem ps, ParticleSystemRenderer ren) =>
             {
-                AddHybridComponent(ps);
-                AddHybridComponent(ren);
+                var entity = GetPrimaryEntity(ps);
+                DstEntityManager.AddComponentObject(entity, ps);
+                DstEntityManager.AddComponentObject(entity, ren);
             });
 
 #if SRP_7_0_0_OR_NEWER
             Entities.ForEach((Volume volume) =>
             {
-                AddHybridComponent(volume);
+                var entity = GetPrimaryEntity(volume);
+                DstEntityManager.AddComponentObject(entity, volume);
             });
 
             // NOTE: Colliders are only converted when a graphics Volume is on the same GameObject to avoid problems with Unity Physics!
             Entities.ForEach((SphereCollider collider, Volume volume) =>
             {
-                AddHybridComponent(collider);
+                var entity = GetPrimaryEntity(collider);
+                DstEntityManager.AddComponentObject(entity, collider);
             });
 
             Entities.ForEach((BoxCollider collider, Volume volume) =>
             {
-                AddHybridComponent(collider);
+                var entity = GetPrimaryEntity(collider);
+                DstEntityManager.AddComponentObject(entity, collider);
             });
 
             Entities.ForEach((CapsuleCollider collider, Volume volume) =>
             {
-                AddHybridComponent(collider);
+                var entity = GetPrimaryEntity(collider);
+                DstEntityManager.AddComponentObject(entity, collider);
             });
 
             Entities.ForEach((MeshCollider collider, Volume volume) =>
             {
-                AddHybridComponent(collider);
+                var entity = GetPrimaryEntity(collider);
+                DstEntityManager.AddComponentObject(entity, collider);
             });
 #endif
 
@@ -110,28 +117,29 @@ namespace Unity.Rendering
 #if UNITY_2020_2_OR_NEWER && UNITY_EDITOR
                 if (light.GetComponent<Light>().lightmapBakeType != LightmapBakeType.Baked)
 #endif
-                    AddHybridComponent(light);
+
+                    DstEntityManager.AddComponentObject(GetPrimaryEntity(light), light);
             });
 
             // HDRP specific extra data for ReflectionProbe
             Entities.ForEach((HDAdditionalReflectionData reflectionData) =>
             {
-                AddHybridComponent(reflectionData);
+                DstEntityManager.AddComponentObject(GetPrimaryEntity(reflectionData), reflectionData);
             });
 
             Entities.ForEach((DecalProjector projector) =>
             {
-                AddHybridComponent(projector);
+                DstEntityManager.AddComponentObject(GetPrimaryEntity(projector), projector);
             });
 
             Entities.ForEach((DensityVolume volume) =>
             {
-                AddHybridComponent(volume);
+                DstEntityManager.AddComponentObject(GetPrimaryEntity(volume), volume);
             });
 
             Entities.ForEach((PlanarReflectionProbe probe) =>
             {
-                AddHybridComponent(probe);
+                DstEntityManager.AddComponentObject(GetPrimaryEntity(probe), probe);
             });
 
 //This feature requires a modified HDRP
@@ -140,7 +148,7 @@ namespace Unity.Rendering
 #if PROBEVOLUME_CONVERSION
             Entities.ForEach((ProbeVolume probe) =>
             {
-                AddHybridComponent(probe);
+                DstEntityManager.AddComponentObject(GetPrimaryEntity(probe), probe);
             });
 #endif
 #endif
@@ -152,7 +160,7 @@ namespace Unity.Rendering
 #if UNITY_2020_2_OR_NEWER && UNITY_EDITOR
                 if (light.GetComponent<Light>().lightmapBakeType != LightmapBakeType.Baked)
 #endif
-                    AddHybridComponent(light);
+                    DstEntityManager.AddComponentObject(GetPrimaryEntity(light), light);
             });
 #endif
 
@@ -160,20 +168,20 @@ namespace Unity.Rendering
             // Camera conversion is disabled by default, because Unity Editor loses track of the main camera if it's put into a subscene
             Entities.ForEach((Camera camera) =>
             {
-                AddHybridComponent(camera);
+                DstEntityManager.AddComponentObject(GetPrimaryEntity(camera), camera);
             });
 
 #if HDRP_7_0_0_OR_NEWER
             Entities.ForEach((HDAdditionalCameraData data) =>
             {
-                AddHybridComponent(data);
+                DstEntityManager.AddComponentObject(GetPrimaryEntity(data), data);
             });
 #endif
 
 #if URP_7_0_0_OR_NEWER
             Entities.ForEach((UniversalAdditionalCameraData data) =>
             {
-                AddHybridComponent(data);
+                DstEntityManager.AddComponentObject(GetPrimaryEntity(data), data);
             });
 #endif
 #endif

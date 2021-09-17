@@ -130,7 +130,7 @@ namespace Unity.Rendering
                 Options = EntityQueryOptions.IncludeDisabled | EntityQueryOptions.IncludePrefab
             });
         }
-  
+
         protected override void  OnUpdate()
         {
             EntityManager.AddComponent(m_MissingRootLODRange, typeof(RootLODRange));
@@ -145,7 +145,7 @@ namespace Unity.Rendering
     [UpdateInGroup(typeof(UpdatePresentationSystemGroup))]
     [WorldSystemFilter(WorldSystemFilterFlags.Default | WorldSystemFilterFlags.EntitySceneOptimizations)]
     [ExecuteAlways]
-    public class LodRequirementsUpdateSystem : JobComponentSystem
+    public partial class LodRequirementsUpdateSystem : SystemBase
     {
         EntityQuery m_UpdatedLODRanges;
         EntityQuery m_LODReferencePoints;
@@ -292,12 +292,12 @@ namespace Unity.Rendering
 
             m_LODReferencePoints = GetEntityQuery(ComponentType.ReadOnly<LocalToWorld>(), ComponentType.ReadOnly<MeshLODComponent>(), typeof(RootLODWorldReferencePoint), typeof(LODWorldReferencePoint));
 
-            // Change filter: LOD Group world reference points only change when MeshLODGroupComponent or LocalToWorld change 
+            // Change filter: LOD Group world reference points only change when MeshLODGroupComponent or LocalToWorld change
             m_LODGroupReferencePoints = GetEntityQuery(ComponentType.ReadOnly<MeshLODGroupComponent>(), ComponentType.ReadOnly<LocalToWorld>(), typeof(LODGroupWorldReferencePoint));
             m_LODGroupReferencePoints.SetChangedVersionFilter(new[] { ComponentType.ReadWrite<MeshLODGroupComponent>(), ComponentType.ReadWrite<LocalToWorld>() });
     }
 
-    protected override JobHandle OnUpdate(JobHandle dependency)
+    protected override void OnUpdate()
         {
             var updateLODRangesJob = new UpdateLODRangesJob
             {
@@ -324,12 +324,12 @@ namespace Unity.Rendering
                 LODWorldReferencePoint = GetComponentTypeHandle<LODWorldReferencePoint>(),
             };
 
-            var depLODRanges = updateLODRangesJob.ScheduleParallel(m_UpdatedLODRanges, dependency);
-            var depGroupReferencePoints = updateGroupReferencePointJob.ScheduleParallel(m_LODGroupReferencePoints, dependency);
+            var depLODRanges = updateLODRangesJob.ScheduleParallel(m_UpdatedLODRanges, Dependency);
+            var depGroupReferencePoints = updateGroupReferencePointJob.ScheduleParallel(m_LODGroupReferencePoints, Dependency);
             var depCombined = JobHandle.CombineDependencies(depLODRanges, depGroupReferencePoints);
             var depReferencePoints = updateReferencePointJob.ScheduleParallel(m_LODReferencePoints, depCombined);
 
-            return JobHandle.CombineDependencies(depReferencePoints, depReferencePoints);
+            Dependency = JobHandle.CombineDependencies(depReferencePoints, depReferencePoints);
         }
     }
 }

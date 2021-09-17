@@ -1,7 +1,6 @@
 using Unity.Entities;
 using Unity.Mathematics;
 
-#if ENABLE_HYBRID_RENDERER_V2
 namespace Unity.Rendering
 {
     [MaterialProperty("_SpecColor", MaterialPropertyFormat.Float4)]
@@ -11,4 +10,3 @@ namespace Unity.Rendering
         public float4 Value;
     }
 }
-#endif

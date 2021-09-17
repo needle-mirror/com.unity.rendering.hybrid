@@ -1,4 +1,4 @@
-#if ENABLE_UNITY_OCCLUSION && ENABLE_HYBRID_RENDERER_V2 && UNITY_2020_2_OR_NEWER && (HDRP_9_0_0_OR_NEWER || URP_9_0_0_OR_NEWER)
+#if ENABLE_UNITY_OCCLUSION && UNITY_2020_2_OR_NEWER && (HDRP_9_0_0_OR_NEWER || URP_9_0_0_OR_NEWER)
 
 using System;
 using Unity.Burst;
@@ -75,7 +75,7 @@ namespace Unity.Rendering.Occlusion
                     batchOutputCount++;
                     continue;
                 }
-				
+
                 INTEL_MOC.CullingResult cullingResult = INTEL_MOC.CullingResult.VISIBLE;
 
 
