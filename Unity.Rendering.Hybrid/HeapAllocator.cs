@@ -44,7 +44,7 @@ namespace Unity.Rendering
             m_SizeBins = new NativeList<SizeBin>(Allocator.Persistent);
             m_Blocks = new NativeList<BlocksOfSize>(Allocator.Persistent);
             m_BlocksFreelist = new NativeList<int>(Allocator.Persistent);
-            m_FreeEndpoints = new NativeHashMap<ulong, ulong>(0, Allocator.Persistent);
+            m_FreeEndpoints = new NativeParallelHashMap<ulong, ulong>(0, Allocator.Persistent);
             m_Size = 0;
             m_Free = 0;
             m_MinimumAlignmentLog2 = math.tzcnt(minimumAlignment);
@@ -360,7 +360,7 @@ namespace Unity.Rendering
         private NativeList<SizeBin> m_SizeBins;
         private NativeList<BlocksOfSize> m_Blocks;
         private NativeList<int> m_BlocksFreelist;
-        private NativeHashMap<ulong, ulong> m_FreeEndpoints;
+        private NativeParallelHashMap<ulong, ulong> m_FreeEndpoints;
         private ulong m_Size;
         private ulong m_Free;
         private readonly int m_MinimumAlignmentLog2;

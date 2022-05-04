@@ -31,7 +31,7 @@ namespace Unity.Rendering
             EntityQuery m_SharedMeshQuery;
             EntityQuery m_RenderMeshQuery;
 
-            NativeHashMap<int, SharedMeshData> m_MeshHashToSharedMeshData;
+            NativeParallelHashMap<int, SharedMeshData> m_MeshHashToSharedMeshData;
 
             protected override void OnCreate()
             {
@@ -44,7 +44,7 @@ namespace Unity.Rendering
                     ComponentType.ReadOnly<DeformedEntity>()
                 );
 
-                m_MeshHashToSharedMeshData = new NativeHashMap<int, SharedMeshData>(64, Allocator.Persistent);
+                m_MeshHashToSharedMeshData = new NativeParallelHashMap<int, SharedMeshData>(64, Allocator.Persistent);
             }
 
             protected override void OnDestroy()

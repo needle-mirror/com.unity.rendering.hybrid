@@ -57,7 +57,7 @@ namespace Unity.Rendering
                 m_AllBlendWeights = new NativeArray<float>(m_PushMeshDataSystem.BlendShapeWeightCount, Allocator.Persistent);
             }
 
-            var deformedEntityToComputeIndex = new NativeMultiHashMap<Entity, int>(m_BlendShapeTagQuery.CalculateEntityCount(), Allocator.TempJob);
+            var deformedEntityToComputeIndex = new NativeParallelMultiHashMap<Entity, int>(m_BlendShapeTagQuery.CalculateEntityCount(), Allocator.TempJob);
             var deformedEntityToComputeIndexParallel = deformedEntityToComputeIndex.AsParallelWriter();
             var hashMapDeps = Entities
                 .WithName("ConstructHashMap")

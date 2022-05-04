@@ -60,7 +60,7 @@ namespace Unity.Rendering
                 m_AllSkinMatrices = new NativeArray<float3x4>(m_PushMeshDataSystem.SkinMatrixCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
             }
 
-            var deformedEntityToComputeIndex = new NativeMultiHashMap<Entity, int>(m_SkinningTagQuery.CalculateEntityCount(), Allocator.TempJob);
+            var deformedEntityToComputeIndex = new NativeParallelMultiHashMap<Entity, int>(m_SkinningTagQuery.CalculateEntityCount(), Allocator.TempJob);
             var deformedEntityToComputeIndexParallel = deformedEntityToComputeIndex.AsParallelWriter();
             var hashMapDeps = Entities
                 .WithName("ConstructHashMap")

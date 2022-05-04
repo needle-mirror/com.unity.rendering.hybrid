@@ -13,6 +13,7 @@
 // #define DEBUG_LOG_MATERIAL_PROPERTIES
 // #define DEBUG_LOG_MEMORY_USAGE
 // #define DEBUG_LOG_AMBIENT_PROBE
+// #define DEBUG_LOG_SPECULAR_DECODE
 // #define PROFILE_BURST_JOB_INTERNALS
 
 #if UNITY_EDITOR || DEBUG_LOG_OVERRIDES
@@ -835,7 +836,7 @@ namespace Unity.Rendering
     // Helper to only call GetDynamicComponentTypeHandle once per type per frame
     internal struct ComponentTypeCache
     {
-        internal NativeHashMap<int, int> UsedTypes;
+        internal NativeParallelHashMap<int, int> UsedTypes;
 
         // Re-populated each frame with fresh objects for each used type.
         // Use C# array so we can hold SafetyHandles without problems.
@@ -850,7 +851,7 @@ namespace Unity.Rendering
         public void Reset(int capacity = 0)
         {
             Dispose();
-            UsedTypes = new NativeHashMap<int, int>(capacity, Allocator.Persistent);
+            UsedTypes = new NativeParallelHashMap<int, int>(capacity, Allocator.Persistent);
             MaxIndex = 0;
         }
 
@@ -1158,6 +1159,7 @@ namespace Unity.Rendering
         private HeapAllocator m_GPUPersistentAllocator;
         private HeapBlock m_SharedZeroAllocation;
         private HeapBlock m_SharedAmbientProbeAllocation;
+        private HeapBlock m_SharedSpecCubeDecodeAllocation;
 
         private HeapAllocator m_ChunkMetadataAllocator;
 
@@ -1167,7 +1169,7 @@ namespace Unity.Rendering
         private NativeList<IntPtr> m_BatchPickingMatrices;
 #endif
         private NativeArray<ChunkProperty> m_ChunkProperties;
-        private NativeHashMap<int, int> m_ExistingBatchInternalIndices;
+        private NativeParallelHashMap<int, int> m_ExistingBatchInternalIndices;
         private ComponentTypeCache m_ComponentTypeCache;
 
         private NativeList<float> m_BatchAABBs;
@@ -1245,9 +1247,9 @@ namespace Unity.Rendering
             public bool IsShared;
         }
 
-        NativeMultiHashMap<int, MaterialPropertyType> m_MaterialPropertyTypes;
-        NativeMultiHashMap<int, MaterialPropertyType> m_MaterialPropertyTypesShared;
-        NativeHashSet<int> m_SharedComponentOverrideTypeIndices;
+        NativeParallelMultiHashMap<int, MaterialPropertyType> m_MaterialPropertyTypes;
+        NativeParallelMultiHashMap<int, MaterialPropertyType> m_MaterialPropertyTypesShared;
+        NativeParallelHashSet<int> m_SharedComponentOverrideTypeIndices;
 
         // When extra debugging is enabled, store mappings from NameIDs to property names,
         // and from type indices to type names.
@@ -1269,10 +1271,13 @@ namespace Unity.Rendering
         private Dictionary<Shader, bool> m_ShaderHasCompileErrors;
 #endif
 
-        NativeHashMap<EntityArchetype, SharedComponentOverridesInfo> m_ArchetypeSharedOverrideInfos;
+        NativeParallelHashMap<EntityArchetype, SharedComponentOverridesInfo> m_ArchetypeSharedOverrideInfos;
 
         private SHProperties m_GlobalAmbientProbe;
         private bool m_GlobalAmbientProbeDirty;
+
+        private float4 m_GlobalSpecCubeDecode;
+        private bool m_GlobalSpecCubeDecodeDirty;
 
         public struct SharedComponentOverridesInfo
         {
@@ -1777,7 +1782,7 @@ namespace Unity.Rendering
             m_BatchPickingMatrices = NewNativeListResized<IntPtr>(kInitialMaxBatchCount, Allocator.Persistent);
 #endif
             m_ChunkProperties = new NativeArray<ChunkProperty>(kMaxChunkMetadata, Allocator.Persistent);
-            m_ExistingBatchInternalIndices = new NativeHashMap<int, int>(128, Allocator.Persistent);
+            m_ExistingBatchInternalIndices = new NativeParallelHashMap<int, int>(128, Allocator.Persistent);
             m_ComponentTypeCache = new ComponentTypeCache(128);
 
             m_BatchAABBs = NewNativeListResized<float>(kInitialMaxBatchCount * (int)HybridChunkUpdater.kFloatsPerAABB, Allocator.Persistent);
@@ -1803,6 +1808,10 @@ namespace Unity.Rendering
             Debug.Assert(!m_SharedAmbientProbeAllocation.Empty, "Allocation of the global ambient probe failed");
             UpdateGlobalAmbientProbe(new SHProperties());
 
+            m_SharedSpecCubeDecodeAllocation = m_GPUPersistentAllocator.Allocate((ulong)UnsafeUtility.SizeOf<float4>());
+            Debug.Assert(!m_SharedSpecCubeDecodeAllocation.Empty, "Allocation of the specular decode value failed");
+            UpdateSpecCubeHDRDecode(ReflectionProbe.defaultTextureHDRDecodeValues);
+
             ResetIds();
 
             m_MetaEntitiesForHybridRenderableChunks = GetEntityQuery(
@@ -1821,15 +1830,15 @@ namespace Unity.Rendering
 #endif
 
             // Collect all components with [MaterialProperty] attribute
-            m_MaterialPropertyTypes = new NativeMultiHashMap<int, MaterialPropertyType>(256, Allocator.Persistent);
-            m_MaterialPropertyTypesShared = new NativeMultiHashMap<int, MaterialPropertyType>(256, Allocator.Persistent);
-            m_SharedComponentOverrideTypeIndices = new NativeHashSet<int>(256, Allocator.Persistent);
+            m_MaterialPropertyTypes = new NativeParallelMultiHashMap<int, MaterialPropertyType>(256, Allocator.Persistent);
+            m_MaterialPropertyTypesShared = new NativeParallelMultiHashMap<int, MaterialPropertyType>(256, Allocator.Persistent);
+            m_SharedComponentOverrideTypeIndices = new NativeParallelHashSet<int>(256, Allocator.Persistent);
             m_MaterialPropertyNames = new Dictionary<int, string>();
             m_MaterialPropertyTypeNames = new Dictionary<int, string>();
             m_MaterialPropertyDefaultValues = new Dictionary<int, float4x4>();
             m_MaterialPropertySharedBuiltins = new Dictionary<int, int>();
             m_ArchetypeSharedOverrideInfos =
-                new NativeHashMap<EntityArchetype, SharedComponentOverridesInfo>(256, Allocator.Persistent);
+                new NativeParallelHashMap<EntityArchetype, SharedComponentOverridesInfo>(256, Allocator.Persistent);
 
             // Some hardcoded mappings to avoid dependencies to Hybrid from DOTS
 #if SRP_10_0_0_OR_NEWER
@@ -1845,6 +1854,9 @@ namespace Unity.Rendering
             RegisterMaterialPropertyType<BuiltinMaterialPropertyUnity_ProbesOcclusion>(
                 "unity_ProbesOcclusion",
                 defaultValue: new float4(1, 1, 1, 1));
+            RegisterMaterialPropertyType<BuiltinMaterialPropertyUnity_SpecCube0_HDR>(
+                "unity_SpecCube0_HDR",
+                defaultValue: new float4(1, 1, 0, 0));
 
             RegisterSharedBuiltin("unity_SHAr", (int) m_SharedAmbientProbeAllocation.begin + SHProperties.kOffsetOfSHAr);
             RegisterSharedBuiltin("unity_SHAg", (int) m_SharedAmbientProbeAllocation.begin + SHProperties.kOffsetOfSHAg);
@@ -1853,6 +1865,9 @@ namespace Unity.Rendering
             RegisterSharedBuiltin("unity_SHBg", (int) m_SharedAmbientProbeAllocation.begin + SHProperties.kOffsetOfSHBg);
             RegisterSharedBuiltin("unity_SHBb", (int) m_SharedAmbientProbeAllocation.begin + SHProperties.kOffsetOfSHBb);
             RegisterSharedBuiltin("unity_SHC",  (int) m_SharedAmbientProbeAllocation.begin + SHProperties.kOffsetOfSHC);
+
+            RegisterSharedBuiltin("unity_SpecCube0_HDR", (int)m_SharedSpecCubeDecodeAllocation.begin);
+            UpdateSpecCubeHDRDecode(ReflectionProbe.defaultTextureHDRDecodeValues);
 
             foreach (var typeInfo in TypeManager.AllTypes)
             {
@@ -2094,6 +2109,8 @@ namespace Unity.Rendering
             }
 
             AlignWithShaderReflectionChanges();
+
+            UpdateSpecCubeHDRDecode(ReflectionProbe.defaultTextureHDRDecodeValues);
 
             JobHandle done = default;
             Profiler.BeginSample("UpdateAllBatches");
@@ -2648,7 +2665,7 @@ namespace Unity.Rendering
             int numGpuUploadOperations = numGpuUploadOperationsArray[0];
             Debug.Assert(numGpuUploadOperations <= gpuUploadOperations.Length, "Maximum GPU upload operation count exceeded");
 
-            BlitGlobalAmbientProbe();
+            BlitGlobalValues();
             ComputeUploadSizeRequirements(
                 numGpuUploadOperations, gpuUploadOperations,
                 out int numOperations, out int totalUploadBytes, out int biggestUploadBytes);
@@ -3942,7 +3959,7 @@ namespace Unity.Rendering
             return list;
         }
 
-        private void BlitGlobalAmbientProbe()
+        private void BlitGlobalValues()
         {
             if (m_GlobalAmbientProbeDirty)
             {
@@ -3950,12 +3967,41 @@ namespace Unity.Rendering
                 BlitBytes(m_SharedAmbientProbeAllocation, &probe, UnsafeUtility.SizeOf<SHProperties>());
                 m_GlobalAmbientProbeDirty = false;
             }
+
+            if (m_GlobalSpecCubeDecodeDirty)
+            {
+                var decodeF4 = m_GlobalSpecCubeDecode;
+                BlitBytes(m_SharedSpecCubeDecodeAllocation, &decodeF4, UnsafeUtility.SizeOf<float4>());
+                m_GlobalSpecCubeDecodeDirty = false;
+            }
+        }
+
+        internal void UpdateSpecCubeHDRDecode(Vector4 specCubeHDRDecode)
+        {
+            if (!s_HybridRendererEnabled) return;
+
+            float4 decodeF4 = specCubeHDRDecode;
+            m_GlobalSpecCubeDecodeDirty =
+                m_GlobalSpecCubeDecodeDirty ||
+                math.any(decodeF4 != m_GlobalSpecCubeDecode);
+
+#if DEBUG_LOG_SPECULAR_DECODE
+            if (m_GlobalSpecCubeDecodeDirty)
+            {
+                Debug.Log($"Global specular probe decode: {decodeF4}");
+            }
+#endif
+            m_GlobalSpecCubeDecode = decodeF4;
         }
 
         internal void UpdateGlobalAmbientProbe(SHProperties globalAmbientProbe)
         {
             if (!s_HybridRendererEnabled) return;
-            m_GlobalAmbientProbeDirty = globalAmbientProbe != m_GlobalAmbientProbe;
+
+            m_GlobalAmbientProbeDirty =
+                m_GlobalAmbientProbeDirty ||
+                globalAmbientProbe != m_GlobalAmbientProbe;
+
 #if DEBUG_LOG_AMBIENT_PROBE
             if (m_GlobalAmbientProbeDirty)
             {

@@ -18,8 +18,8 @@ namespace Unity.Rendering
         ResizeBuffersSystem m_ResizeBuffersSystem;
         internal int SkinMatrixCount { get { return m_ResizeBuffersSystem.totalSkinMatrixCount; } }
 
-        internal NativeHashMap<int, int> MeshHashToSkinMatrixIndex;
-        internal NativeHashMap<int, int> MeshHashToInstanceCount;
+        internal NativeParallelHashMap<int, int> MeshHashToSkinMatrixIndex;
+        internal NativeParallelHashMap<int, int> MeshHashToInstanceCount;
 
         internal List<SharedMeshData> UniqueSharedMeshData { get; private set; }
 
@@ -34,9 +34,9 @@ namespace Unity.Rendering
 
         Dictionary<int, RenderMesh> m_MeshHashToRenderMesh;
 
-        internal NativeHashMap<int, SharedMeshBufferIndex> MeshHashToSharedBuffer;
-        internal NativeHashMap<int, uint> MeshHashToDeformedMeshIndex;
-        internal NativeHashMap<int, int> MeshHashToBlendWeightIndex;
+        internal NativeParallelHashMap<int, SharedMeshBufferIndex> MeshHashToSharedBuffer;
+        internal NativeParallelHashMap<int, uint> MeshHashToDeformedMeshIndex;
+        internal NativeParallelHashMap<int, int> MeshHashToBlendWeightIndex;
 
         internal BlendShapeBufferManager BlendShapeBufferManager { get; private set; }
         internal MeshBufferManager MeshBufferManager { get; private set; }
@@ -91,9 +91,9 @@ namespace Unity.Rendering
             m_PushSharedMeshDataSystem = World.GetOrCreateSystem<PushSharedMeshDataSystem>();
             m_PushSharedMeshDataSystem.Parent = this;
 
-            MeshHashToSharedBuffer = new NativeHashMap<int, SharedMeshBufferIndex>(64, Allocator.Persistent);
-            MeshHashToDeformedMeshIndex = new NativeHashMap<int, uint>(64, Allocator.Persistent);
-            MeshHashToBlendWeightIndex = new NativeHashMap<int, int>(64, Allocator.Persistent);
+            MeshHashToSharedBuffer = new NativeParallelHashMap<int, SharedMeshBufferIndex>(64, Allocator.Persistent);
+            MeshHashToDeformedMeshIndex = new NativeParallelHashMap<int, uint>(64, Allocator.Persistent);
+            MeshHashToBlendWeightIndex = new NativeParallelHashMap<int, int>(64, Allocator.Persistent);
             m_MeshHashToRenderMesh = new Dictionary<int, RenderMesh>(64);
 
             MeshBufferManager = new MeshBufferManager();
@@ -104,8 +104,8 @@ namespace Unity.Rendering
 
             m_RebuildSharedMeshBuffers = true;
 #endif
-            MeshHashToInstanceCount = new NativeHashMap<int, int>(64, Allocator.Persistent);
-            MeshHashToSkinMatrixIndex = new NativeHashMap<int, int>(64, Allocator.Persistent);
+            MeshHashToInstanceCount = new NativeParallelHashMap<int, int>(64, Allocator.Persistent);
+            MeshHashToSkinMatrixIndex = new NativeParallelHashMap<int, int>(64, Allocator.Persistent);
 
             UniqueSharedMeshData = new List<SharedMeshData>();
 
@@ -214,10 +214,10 @@ namespace Unity.Rendering
 
                 using (var chunks = m_BufferIndexQuery.CreateArchetypeChunkArray(Allocator.TempJob))
                 {
-                    var skinMatrixInstancesMap = new NativeHashMap<int, int>(chunks.Length, Allocator.Temp);
+                    var skinMatrixInstancesMap = new NativeParallelHashMap<int, int>(chunks.Length, Allocator.Temp);
 #if ENABLE_COMPUTE_DEFORMATIONS
-                    var deformedMeshInstancesMap = new NativeHashMap<int, int>(chunks.Length, Allocator.Temp);
-                    var blendShapeWeightInstancesMap = new NativeHashMap<int, int>(chunks.Length, Allocator.Temp);
+                    var deformedMeshInstancesMap = new NativeParallelHashMap<int, int>(chunks.Length, Allocator.Temp);
+                    var blendShapeWeightInstancesMap = new NativeParallelHashMap<int, int>(chunks.Length, Allocator.Temp);
 #endif
                     foreach (var chunk in chunks)
                     {
