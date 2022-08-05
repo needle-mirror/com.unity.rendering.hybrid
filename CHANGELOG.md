@@ -1,31 +1,53 @@
 # Changelog
 
-## [0.51.1] - 2022-06-27
+## [0.61.0] - 2022-08-05
 
 ### Changed
 
-* Package Dependencies
-  * `com.unity.entities` to version  `0.51.1`
+* Hybrid Renderer package is renamed to Entities Graphics. This package is only here for automatic dependency on com.unity.entities.graphics
 
-## [0.51.0] - 2022-05-04
+
+
+### Added
+
+* Hybrid assemblies will not be included in DOTS Runtime builds.
+* Error/loading shader support for Hybrid Renderer
+* FencedBufferPool to stop data uploads from overlapping across frames, this is required for the above improvement.
+* Warning when loading a scene with too many deformed meshes that won't fit into a GraphicsBuffer.
 
 ### Changed
 
-* Package Dependencies
-  * `com.unity.entities` to version  `0.51.0`
+
+### Deprecated
+
+
+### Removed
+
+* DeformedRendererMesh component, like HybridRenderer the deformation systems now relies on BatchMeshIDs.
+* Skinning/BlendShape tag components, these did not provide any functionality by themselves.
+* Finalize deformation systems, the GPU data upload is now handled by the corresponding deformation system.
+* HLOD moved into MegaCity
 
 ### Fixed
 
-* Fixed a bug where specular reflections would become black regardless of intensity settings
+* Temporarily disable Hybrid Renderer error/loading shader support.
+* Fixed bug where LOD movement grace was not reset correctly when chunks changed
+
+### Security
+
+
+### Improved
+
+* buffer uploading by adopting the Lock/Unlock buffer for write API.
+* SkinMatrices now update if their corresponding GameObject's transform has changed.
 
 
 
-## [0.50.0] - 2021-09-17
+## [0.14.0] - 2021-09-17
 
 ### Added
 
 * Hybrid Renderer is automatically disabled when required support is not present or -nographics is given on the command line.
-* Hybrid assemblies will not be included in DOTS Runtime builds.
 
 ### Removed
 
@@ -36,9 +58,6 @@
 * Fixed memory leak on frames where no data uploading happened.
 * `HybridRendererSystem` was not correctly tracking all its component read/write dependencies.
 * Warning about erroneous materials did not have enough information to act on them.
-* Updated code comments to not refer to a deleted method.
-
-
 
 ## [0.13.0] - 2021-03-15
 

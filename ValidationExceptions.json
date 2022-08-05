@@ -1,0 +1,15 @@
+{
+    "ErrorExceptions": [],
+    "WarningExceptions": [
+        {
+            "ValidationTest": "Manifest Validation",
+            "ExceptionMessage": "Package dependency com.unity.entities@1.0.0-exp.3 must be promoted to production before this package is promoted to production. (Except for core packages)",
+            "PackageVersion": "1.0.0-exp.3"
+        },
+        {
+            "ValidationTest": "Folder Structure Validation",
+            "ExceptionMessage": "The Resources Directory should not be used in packages.  For more guidance, please visit https://docs.unity3d.com/Manual/BestPracticeUnderstandingPerformanceInUnity6.html",
+            "PackageVersion": "1.0.0-exp.3"
+        }
+    ]
+}
